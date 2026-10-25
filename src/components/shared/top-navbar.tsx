@@ -1,8 +1,10 @@
 import { Suspense } from "react";
 import { getShopSession } from "@/lib/auth";
+import { getStoreContext } from "@/lib/store";
 import { GlobalSearch } from "./global-search";
 import { MobileNavButton } from "./mobile-nav";
 import { NotificationBell } from "./notification-bell";
+import { StoreSwitcher } from "./store-switcher";
 import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 import { WhatsNew } from "./whats-new";
@@ -35,6 +37,14 @@ async function WhatsNewSection() {
   return <WhatsNew seen={session.whatsNewSeen} />;
 }
 
+/** Phase 20: the current store, once the organization has more than one. */
+async function StoreSection() {
+  const ctx = await getStoreContext();
+  if (!ctx.multi) return null;
+  const pick = ({ id, name, code }: { id: string; name: string; code: string | null }) => ({ id, name, code });
+  return <StoreSwitcher current={pick(ctx.current)} stores={ctx.workStores.map(pick)} />;
+}
+
 /** Top bar ported from design/figma-ui/src/App.tsx: global search (Ctrl/⌘ K), light/dark, notifications, profile. */
 export function TopNavbar() {
   return (
@@ -42,6 +52,9 @@ export function TopNavbar() {
       <MobileNavButton />
       <GlobalSearch />
       <div className="top-actions">
+        <Suspense fallback={null}>
+          <StoreSection />
+        </Suspense>
         <Suspense fallback={null}>
           <WhatsNewSection />
         </Suspense>

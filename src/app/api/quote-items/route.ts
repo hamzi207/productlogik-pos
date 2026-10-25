@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { buildCategoryIndex, descendantIds } from "@/lib/categories";
 import { getCategories } from "@/lib/category-data";
+import { ITEM_STOCK_EMBED, mapItemStock, priceAt, stockAt, type ItemStockRow } from "@/lib/stock";
 import { createClient } from "@/lib/supabase/server";
 import type { PickerItemsResponse } from "@/lib/types/quote";
 import { ITEM_UNITS_EMBED, unitOptions, type BaseUnit, type ItemConversion } from "@/lib/uom";
@@ -15,10 +16,12 @@ import { ITEM_UNITS_EMBED, unitOptions, type BaseUnit, type ItemConversion } fro
  * Search uses search_inventory_items; a query that is exactly a pack's barcode (Phase 19) finds its
  * product, marked with `scan_uom_id` so the line starts in that pack. Runs with the caller's session,
  * so RLS limits it to their shop.
+ *   &store=<id> (Phase 20) → stock, low-stock level and price at the document's store, plus
+ *                            `store_stock` (available per store) for "15 at Store B".
  */
-const querySchema = z.object({ q: z.string().trim().max(100).optional(), category: z.uuid().optional() });
+const querySchema = z.object({ q: z.string().trim().max(100).optional(), category: z.uuid().optional(), store: z.uuid().optional() });
 
-const ITEM_COLUMNS = `id, sku, name, category:categories(name), selling_price, quantity_on_hand, reserved_quantity, low_stock_threshold, price_includes_tax, sale_uom_id, ${ITEM_UNITS_EMBED}`;
+const ITEM_COLUMNS = `id, sku, name, category:categories(name), selling_price, quantity_on_hand, reserved_quantity, low_stock_threshold, price_includes_tax, sale_uom_id, ${ITEM_UNITS_EMBED}, ${ITEM_STOCK_EMBED}`;
 
 type Row = {
   id: string;
@@ -33,14 +36,14 @@ type Row = {
   sale_uom_id: string | null;
   base_uom: BaseUnit | null;
   item_uom_conversions: ItemConversion[];
-};
+} & ItemStockRow;
 
 export async function GET(request: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(request.nextUrl.searchParams));
   if (!parsed.success) {
     return Response.json({ error: "Invalid search." }, { status: 400 });
   }
-  const { q, category } = parsed.data;
+  const { q, category, store } = parsed.data;
 
   const supabase = await createClient();
   const { data: claims } = await supabase.auth.getClaims();
@@ -67,16 +70,23 @@ export async function GET(request: NextRequest) {
   }
 
   const body: PickerItemsResponse = {
-    items: data.map(({ base_uom, item_uom_conversions, ...item }) => ({
-      ...item,
-      selling_price: Number(item.selling_price),
-      quantity_on_hand: Number(item.quantity_on_hand),
-      reserved_quantity: Number(item.reserved_quantity),
-      low_stock_threshold: Number(item.low_stock_threshold),
-      units: unitOptions({ selling_price: item.selling_price, base_uom, item_uom_conversions }, packs),
-      sale_uom_id: packs ? item.sale_uom_id : null,
-      scan_uom_id: packs && scanned.data?.item_id === item.id ? scanned.data.uom_id : null,
-    })),
+    items: data.map(({ base_uom, item_uom_conversions, stock_levels, store_item_prices, ...item }) => {
+      const { stock, store_prices } = mapItemStock({ stock_levels, store_item_prices });
+      // RF-20.1: the store's own price replaces the base price (packs with their own price keep theirs).
+      const price = store ? priceAt({ selling_price: item.selling_price, store_prices }, store) : Number(item.selling_price);
+      const at = store ? stockAt(stock, store) : null;
+      return {
+        ...item,
+        selling_price: price,
+        quantity_on_hand: at ? at.onHand : Number(item.quantity_on_hand),
+        reserved_quantity: at ? at.reserved : Number(item.reserved_quantity),
+        low_stock_threshold: at?.threshold ?? Number(item.low_stock_threshold),
+        units: unitOptions({ selling_price: price, base_uom, item_uom_conversions }, packs),
+        sale_uom_id: packs ? item.sale_uom_id : null,
+        scan_uom_id: packs && scanned.data?.item_id === item.id ? scanned.data.uom_id : null,
+        store_stock: Object.fromEntries(stock.map((l) => [l.store_id, l.on_hand - l.reserved])),
+      };
+    }),
   };
   return Response.json(body, { headers: { "Cache-Control": "no-store" } });
 }

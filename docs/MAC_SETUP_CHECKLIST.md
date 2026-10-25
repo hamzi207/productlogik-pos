@@ -56,12 +56,12 @@ Transfer this file to your MacBook securely (via AirDrop, encrypted notes, 1Pass
 
 Your `.env.local` should have at least:
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://atjbxwhvtattwiivrqbe.supabase.co
+NEXT_PUBLIC_SUPABASE_URL=https://sgdbhdmsvfmqxlpkrgez.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key_here
 SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 # Optional (needed if running npm run db:push or npm run db:types):
-# SUPABASE_DB_URL=postgresql://postgres.atjbxwhvtattwiivrqbe:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres
+# SUPABASE_DB_URL=postgresql://postgres.sgdbhdmsvfmqxlpkrgez:PASSWORD@aws-0-REGION.pooler.supabase.com:5432/postgres
 ```
 
 ---
@@ -217,7 +217,7 @@ npm run dev
 ### 3. If You Modified the Supabase Database:
 - If you ran `npm run db:push` on Windows, the remote database updated.
 - On Mac, simply pull the code and run `npm run db:types` if you need to regenerate types.
-- Both machines connect to the **same remote Supabase project** (`atjbxwhvtattwiivrqbe`), so your database data remains synchronized automatically!
+- Both machines connect to the **same remote Supabase project** (`sgdbhdmsvfmqxlpkrgez`), so your database data remains synchronized automatically!
 
 ---
 

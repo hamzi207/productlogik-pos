@@ -4,6 +4,8 @@ import { notFound, redirect } from "next/navigation";
 import { ChevronRight, FilePen, FileText, Plus, ReceiptText } from "lucide-react";
 import { getDocuments, getQuote } from "@/lib/actions/quotes";
 import { getShopSession } from "@/lib/auth";
+import { getDocumentStores, getStoreContext, storeFilter } from "@/lib/store";
+import { StoreScope } from "@/components/shared/store-scope";
 import { buildCategoryIndex } from "@/lib/categories";
 import { getCategories, getCategoryCounts } from "@/lib/category-data";
 import { hasModule } from "@/lib/module-data";
@@ -51,7 +53,11 @@ async function DocumentTable({ section, searchParams }: { section: DocumentSecti
   const filters = documentFiltersSchema.parse({ search: first(raw.q) || undefined, status: first(raw.status) || undefined });
   const pagination = parsePagination({ page: first(raw.page), limit: first(raw.limit) });
   const config = SECTION[section];
-  const [result, { tenant }] = await Promise.all([getDocuments(section, filters, pagination), getShopSession()]);
+  // Phase 20: the current store's documents, or every store's with ?store=all.
+  const [scope, ctx] = await Promise.all([storeFilter(first(raw.store)), getStoreContext()]);
+  const storeName = new Map(ctx.stores.map((s) => [s.id, s.name]));
+  const showStore = ctx.multi && scope.all;
+  const [result, { tenant }] = await Promise.all([getDocuments(section, filters, pagination, scope.storeId), getShopSession()]);
   const pastEnd = pastEndRedirect(config.path, raw, result);
   if (pastEnd) redirect(pastEnd);
   const docs = result.rows;
@@ -99,6 +105,7 @@ async function DocumentTable({ section, searchParams }: { section: DocumentSecti
             <tr>
               <th>NUMBER</th>
               <th>CUSTOMER</th>
+              {showStore && <th>STORE</th>}
               <th>{dateLabel}</th>
               {invoices && <th>DUE DATE</th>}
               <th>STATUS</th>
@@ -134,6 +141,7 @@ async function DocumentTable({ section, searchParams }: { section: DocumentSecti
                       "—"
                     )}
                   </td>
+                  {showStore && <td>{storeName.get(d.store_id) ?? "—"}</td>}
                   <td>{formatDate(sectionDate(section, d), tenant.timezone)}</td>
                   {invoices && <td>{d.due_date ? formatDate(`${d.due_date}T12:00:00Z`, "UTC") : "—"}</td>}
                   <td>
@@ -226,11 +234,24 @@ export function DocumentListPage({ section, searchParams }: { section: DocumentS
       <section className="card customer-card">
         <Suspense>
           <DocumentFilters section={section} />
+          <ListStoreScope searchParams={searchParams} />
         </Suspense>
         <Suspense fallback={<div className="empty-state">Loading {config.title.toLowerCase()}…</div>}>
           <DocumentTable section={section} searchParams={searchParams} />
         </Suspense>
       </section>
+    </div>
+  );
+}
+
+/** "This store | All stores" above a list (more than one store, members who may see them all). */
+export async function ListStoreScope({ searchParams }: { searchParams: SearchParams }) {
+  const [raw, ctx] = await Promise.all([searchParams, getStoreContext()]);
+  if (!ctx.multi || !ctx.canSeeAll) return null;
+  const scope = await storeFilter(first(raw.store));
+  return (
+    <div className="store-scope-bar">
+      <StoreScope storeName={ctx.current.name} all={scope.all} />
     </div>
   );
 }
@@ -265,11 +286,12 @@ async function mainCategories() {
 async function NewDocument({ section, searchParams }: { section: DocumentSection; searchParams: SearchParams }) {
   const raw = await searchParams;
   const customerId = first(raw.customer);
-  const [{ tenant }, walkIn, categories, vehicleSearch] = await Promise.all([
+  const [{ tenant, role }, walkIn, categories, vehicleSearch, stores] = await Promise.all([
     getShopSession(),
     getWalkIn(),
     mainCategories(),
     hasModule("vehicle_fitment"),
+    getDocumentStores(null),
   ]);
 
   // ?customer=<id> pre-selects a customer (from their profile page).
@@ -284,7 +306,8 @@ async function NewDocument({ section, searchParams }: { section: DocumentSection
   // saved the number stays free, and if someone else saves first this one
   // simply gets the next free number when it is saved.
   const supabase = await createClient();
-  const { data: nextNumber } = await supabase.rpc("next_document_number", { p_prefix: NUMBER_PREFIX[section] });
+  // Phase 20: numbered in the current store's series when the organization numbers per store (RF-20.2).
+  const { data: nextNumber } = await supabase.rpc("next_document_number", { p_prefix: NUMBER_PREFIX[section], p_store_id: stores.docStoreId });
 
   const today = localDate(tenant.timezone);
   return (
@@ -295,6 +318,7 @@ async function NewDocument({ section, searchParams }: { section: DocumentSection
       numberPreview={nextNumber ?? null}
       meta={[
         { label: "Number", value: nextNumber ?? "Assigned when saved" },
+        ...(stores.multi ? [{ label: "Store", value: stores.docStoreName }] : []),
         { label: "Date", value: formatDate(new Date(), tenant.timezone) },
         ...(section === "quotations" ? [{ label: "Valid for", value: `${tenant.quoteValidityDays} days` }] : []),
       ]}
@@ -312,6 +336,8 @@ async function NewDocument({ section, searchParams }: { section: DocumentSection
       walkIn={walkIn}
       categories={categories}
       vehicleSearch={vehicleSearch}
+      stores={stores}
+      isAdmin={role === "admin"}
     />
   );
 }
@@ -326,7 +352,7 @@ export function NewDocumentPage({ section, searchParams }: { section: DocumentSe
 
 async function EditDocument({ section, params }: { section: DocumentSection; params: Params }) {
   const { id } = await params;
-  const [doc, { tenant }, walkIn, categories, vehicleSearch] = await Promise.all([
+  const [doc, { tenant, role }, walkIn, categories, vehicleSearch] = await Promise.all([
     getQuote(id),
     getShopSession(),
     getWalkIn(),
@@ -334,6 +360,7 @@ async function EditDocument({ section, params }: { section: DocumentSection; par
     hasModule("vehicle_fitment"),
   ]);
   if (!doc) notFound();
+  const stores = await getDocumentStores(doc.store_id);
 
   // A converted document lives in its new section: /drafts/x → /invoices/x.
   const actual = sectionForStatus(doc.status);
@@ -344,6 +371,7 @@ async function EditDocument({ section, params }: { section: DocumentSection; par
   const earlier = earlierNumbers(doc);
   const meta = [
     { label: "Number", value: doc.quote_number },
+    ...(stores.multi ? [{ label: "Store", value: stores.docStoreName }] : []),
     ...(earlier.length ? [{ label: doc.status === "draft" ? "Was" : "From", value: earlier.join(" · ") }] : []),
     { label: "Created", value: formatDate(doc.created_at, tz) },
     ...(doc.quoted_at && actual === "quotations" ? [{ label: "Quoted", value: formatDate(doc.quoted_at, tz) }] : []),
@@ -376,6 +404,8 @@ async function EditDocument({ section, params }: { section: DocumentSection; par
       walkIn={walkIn}
       categories={categories}
       vehicleSearch={vehicleSearch}
+      stores={stores}
+      isAdmin={role === "admin"}
     />
   );
 }

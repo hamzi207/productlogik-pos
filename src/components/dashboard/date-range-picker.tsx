@@ -6,6 +6,7 @@ import { Popover } from "radix-ui";
 import { CalendarRange, ChevronDown, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { MobileSheet } from "@/components/quotes/mobile-sheet";
 import { RANGE_LABEL, type RangeKey } from "@/lib/dashboard";
+import { formatDay, formatDayMonth } from "@/lib/format";
 import { PHONE_QUERY, useMediaQuery } from "@/lib/hooks/use-media-query";
 import type { WeekStart } from "@/lib/validations/settings.schema";
 
@@ -37,16 +38,14 @@ const addMonths = (iso: string, n: number) => {
   return toIso(d);
 };
 
-const fmtDay = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-const fmtFull = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 const fmtMonth = new Intl.DateTimeFormat("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
 // Index = ISO day number (1 Monday … 7 Sunday).
 const WEEKDAY = ["", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
 
 function rangeText(from: string, to: string | null) {
-  if (!to || from === to) return fmtFull.format(toDate(from));
+  if (!to || from === to) return formatDay(from);
   const sameYear = from.slice(0, 4) === to.slice(0, 4);
-  return `${(sameYear ? fmtDay : fmtFull).format(toDate(from))} – ${fmtFull.format(toDate(to))}`;
+  return `${sameYear ? formatDayMonth(from) : formatDay(from)} – ${formatDay(to)}`;
 }
 
 type Preset = { key: string; label: string; range: RangeKey; from?: string; to?: string };
@@ -162,7 +161,7 @@ export function DateRangePicker({ range, from, to, today, weekStart, keep }: Pro
                 disabled={future}
                 onClick={() => pickDay(d)}
                 onMouseEnter={() => setHover(d)}
-                aria-label={fmtFull.format(toDate(d))}
+                aria-label={formatDay(d)}
                 aria-pressed={edge}
               >
                 {Number(d.slice(8))}

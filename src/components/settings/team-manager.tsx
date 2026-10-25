@@ -46,15 +46,23 @@ type Props = {
   ownerId?: string | null;
   /** Superadmin console: extra per-member tools (passwords, sign-out, ownership). */
   memberTools?: (member: TeamRow) => ReactNode;
+  /** Users the subscription allows (active + invited; null = no limit). */
+  userLimit: number | null;
 };
 
-/** Settings → Team: who can sign in to this shop, their role and status; invite, change, deactivate. */
-export function TeamManager({ members, meId, canEdit, tenantId, ownerId, memberTools }: Props) {
+/**
+ * Settings → Team: who can sign in to this shop, their role and status; invite, change, deactivate.
+ * Invites and reactivations stay within the subscription's user limit (checked again in the database);
+ * past it the superadmin raises the limit.
+ */
+export function TeamManager({ members, meId, canEdit, tenantId, ownerId, memberTools, userLimit }: Props) {
   const [inviting, setInviting] = useState(false);
   const counts = {
     active: members.filter((m) => m.status === "active").length,
     invited: members.filter((m) => m.status === "invited").length,
   };
+  const full = userLimit !== null && counts.active + counts.invited >= userLimit;
+  const included = userLimit === null ? null : `${userLimit} ${userLimit === 1 ? "user" : "users"}`;
 
   return (
     <section className="card settings-card">
@@ -63,16 +71,24 @@ export function TeamManager({ members, meId, canEdit, tenantId, ownerId, memberT
         <div>
           <h2>Team</h2>
           <p>
-            {counts.active} active{counts.invited ? ` · ${counts.invited} invited` : ""}. Admins can change settings and the team; staff
-            work with quotations, invoices, customers and stock.
+            {counts.active} active{counts.invited ? ` · ${counts.invited} invited` : ""}
+            {included ? ` of the ${included} the subscription includes` : ""}. Admins can change settings and the team; staff work with
+            quotations, invoices, customers and stock.
           </p>
         </div>
-        {canEdit && (
-          <button type="button" className="button button-primary" onClick={() => setInviting(true)}>
+        {canEdit && (tenantId || !full) && (
+          <button type="button" className="button button-primary" disabled={Boolean(tenantId) && full} onClick={() => setInviting(true)}>
             <UserPlus size={14} /> Invite Team Member
           </button>
         )}
       </div>
+      {canEdit && full && (
+        <div className="form-alert form-alert-info team-alert" role="status">
+          {tenantId
+            ? `The subscription includes ${included} and all are taken. Raise its user limit on the Subscription tab to add another.`
+            : `Your subscription includes ${included}. To add another, ask ProductLogik to update it (Subscription → Request a Plan Change), or deactivate someone who has left.`}
+        </div>
+      )}
       {!canEdit && (
         <div className="form-alert form-alert-info team-alert" role="status">
           Only shop admins can invite or change team members.

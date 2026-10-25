@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
+import { formatDate } from "@/lib/format";
 import type { ClockStyle } from "@/lib/validations/settings.schema";
 
 // One shared ticker for every mounted clock, aligned to whole seconds.
@@ -46,7 +47,7 @@ export function ShopClock({ timeZone, clockStyle, hour24 }: Props) {
       time: new Intl.DateTimeFormat("en-US", hour24
         ? { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }
         : { timeZone, hour: "numeric", minute: "2-digit", hourCycle: "h12" }),
-      date: new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "long", day: "numeric", month: "short", year: "numeric" }),
+      weekday: new Intl.DateTimeFormat("en-GB", { timeZone, weekday: "long" }),
       offset: new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" }),
       hands: new Intl.DateTimeFormat("en-US", { timeZone, hour: "numeric", minute: "numeric", second: "numeric", hourCycle: "h23" }),
     }),
@@ -60,7 +61,7 @@ export function ShopClock({ timeZone, clockStyle, hour24 }: Props) {
   const date = new Date(current);
   const offset = formats.offset.formatToParts(date).find((p) => p.type === "timeZoneName")?.value ?? "GMT";
   const zoneLabel = `${timeZone.replaceAll("_", " ")} · ${offset === "GMT" ? "UTC±00:00" : offset.replace("GMT", "UTC")}`;
-  const dateLabel = formats.date.format(date);
+  const dateLabel = `${formats.weekday.format(date)} ${formatDate(date, timeZone)}`;
 
   if (clockStyle === "analog") {
     const parts = Object.fromEntries(formats.hands.formatToParts(date).map((p) => [p.type, Number(p.value)]));

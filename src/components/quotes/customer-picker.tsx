@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Banknote, ChevronRight, Loader2, Search, UserPlus, Users, X } from "lucide-react";
+import { ArrowLeftRight, Banknote, ChevronRight, Loader2, Search, UserPlus, Users, X } from "lucide-react";
 import { formatPhone } from "@/lib/phone";
 import { LOOKUP_DELAY_MS } from "@/lib/search-delay";
 import type { CustomerOption, CustomerOptionsResponse } from "@/lib/types/quote";
@@ -16,6 +16,8 @@ type Props = {
   /** The shop's walk-in / cash customer, for the quick-select button. */
   walkIn: CustomerOption | null;
   disabled?: boolean;
+  /** Saved invoices: the customer can be swapped for another (Change) but never removed (no ×). */
+  required?: boolean;
 };
 
 async function fetchCustomers(params: string, signal?: AbortSignal) {
@@ -59,7 +61,7 @@ function useCustomerSearch(enabled: boolean, query: string) {
  * Searchable customer combobox, with "register new customer" in a modal.
  * On phones the search opens as a full-screen sheet.
  */
-export function CustomerPicker({ value, onChange, allowInternationalPhones, walkIn, disabled }: Props) {
+export function CustomerPicker({ value, onChange, allowInternationalPhones, walkIn, disabled, required }: Props) {
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const sheetInputRef = useRef<HTMLInputElement>(null);
@@ -67,14 +69,28 @@ export function CustomerPicker({ value, onChange, allowInternationalPhones, walk
   const [open, setOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [registering, setRegistering] = useState(false);
+  // `required`: searching for another customer while the current one stays chosen until one is picked.
+  const [changing, setChanging] = useState(false);
   const { results, active, setActive, loading, error, setError } = useCustomerSearch(open || sheetOpen, query);
 
   const choose = (customer: CustomerOption) => {
     onChange(customer);
     setOpen(false);
     setSheetOpen(false);
+    setChanging(false);
     setQuery("");
   };
+  const keepCurrent = () => {
+    setChanging(false);
+    setOpen(false);
+    setQuery("");
+  };
+  /** Into the search: the inline field, or on phones (field hidden) the search sheet. */
+  const startSearch = () =>
+    requestAnimationFrame(() => {
+      if (inputRef.current?.offsetParent) inputRef.current.focus();
+      else setSheetOpen(true);
+    });
   const register = () => {
     setOpen(false);
     setSheetOpen(false);
@@ -90,7 +106,7 @@ export function CustomerPicker({ value, onChange, allowInternationalPhones, walk
     }
   };
 
-  if (value) {
+  if (value && !changing) {
     return (
       <div className="customer-picked">
         <CustomerAvatar name={value.name} />
@@ -107,7 +123,20 @@ export function CustomerPicker({ value, onChange, allowInternationalPhones, walk
             )}
           </span>
         </div>
-        {!disabled && (
+        {!disabled && required && (
+          <button
+            type="button"
+            className="button customer-change"
+            title="Pick another customer for this invoice"
+            onClick={() => {
+              setChanging(true);
+              startSearch();
+            }}
+          >
+            <ArrowLeftRight size={13} /> Change
+          </button>
+        )}
+        {!disabled && !required && (
           <button
             type="button"
             className="icon-button"
@@ -115,11 +144,7 @@ export function CustomerPicker({ value, onChange, allowInternationalPhones, walk
             title="Change customer"
             onClick={() => {
               onChange(null);
-              // Phones (inline field hidden) get the search sheet instead.
-              requestAnimationFrame(() => {
-                if (inputRef.current?.offsetParent) inputRef.current.focus();
-                else setSheetOpen(true);
-              });
+              startSearch();
             }}
           >
             <X size={15} />
@@ -141,9 +166,16 @@ export function CustomerPicker({ value, onChange, allowInternationalPhones, walk
       e.preventDefault();
       choose(results[active]);
     } else if (e.key === "Escape") {
-      setOpen(false);
+      if (changing) keepCurrent();
+      else setOpen(false);
     }
   };
+  const keepButton = (big: boolean) =>
+    changing && value ? (
+      <button type="button" className="button" onClick={keepCurrent} title={`Keep ${value.name} as the customer`}>
+        <X size={big ? 16 : 14} /> Keep {value.is_walk_in ? "walk-in" : "current"}
+      </button>
+    ) : null;
 
   return (
     <div className="customer-combobox">
@@ -182,6 +214,7 @@ export function CustomerPicker({ value, onChange, allowInternationalPhones, walk
           <Banknote size={14} /> Walk-in / Cash
         </button>
       )}
+      {keepButton(false)}
       </div>
       {open && (
         <div className="combobox-menu">
@@ -226,12 +259,15 @@ export function CustomerPicker({ value, onChange, allowInternationalPhones, walk
             <Banknote size={16} /> Walk-in / Cash
           </button>
         )}
+        {keepButton(true)}
       </div>
       <MobileSheet
         open={sheetOpen}
         onOpenChange={(next) => {
           setSheetOpen(next);
           if (!next) setQuery("");
+          // Closing the sheet without a pick keeps the current customer.
+          if (!next && changing) setChanging(false);
         }}
         title="Choose a customer"
         description="Search by name, phone or NTN, or bill a walk-in customer."

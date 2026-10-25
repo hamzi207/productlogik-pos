@@ -1064,11 +1064,48 @@ export type Database = {
           },
         ]
       }
+      profile_stores: {
+        Row: {
+          created_at: string
+          profile_id: string
+          store_id: string
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          profile_id: string
+          store_id: string
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          profile_id?: string
+          store_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "profile_stores_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profile_stores_tenant_id_store_id_fkey"
+            columns: ["tenant_id", "store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           created_at: string
           dashboard_prefs: Json
           deactivated_at: string | null
+          default_store_id: string | null
           email: string
           full_name: string
           id: string
@@ -1081,6 +1118,7 @@ export type Database = {
           created_at?: string
           dashboard_prefs?: Json
           deactivated_at?: string | null
+          default_store_id?: string | null
           email: string
           full_name: string
           id: string
@@ -1093,6 +1131,7 @@ export type Database = {
           created_at?: string
           dashboard_prefs?: Json
           deactivated_at?: string | null
+          default_store_id?: string | null
           email?: string
           full_name?: string
           id?: string
@@ -1128,6 +1167,7 @@ export type Database = {
           reserved_qty: number
           sale_price: number
           sort_order: number
+          source_store_id: string | null
           tenant_id: string
           total_price: number
           unit_cost: number
@@ -1152,6 +1192,7 @@ export type Database = {
           reserved_qty?: number
           sale_price?: number
           sort_order?: number
+          source_store_id?: string | null
           tenant_id: string
           total_price?: number
           unit_cost?: number
@@ -1176,6 +1217,7 @@ export type Database = {
           reserved_qty?: number
           sale_price?: number
           sort_order?: number
+          source_store_id?: string | null
           tenant_id?: string
           total_price?: number
           unit_cost?: number
@@ -1185,6 +1227,13 @@ export type Database = {
           uom_label?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "quote_items_source_store_fkey"
+            columns: ["tenant_id", "source_store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["tenant_id", "id"]
+          },
           {
             foreignKeyName: "quote_items_uom_id_fkey"
             columns: ["uom_id"]
@@ -1241,6 +1290,7 @@ export type Database = {
           quoted_at: string | null
           share_token: string
           status: string
+          store_id: string
           subtotal: number
           tax_amount: number
           tax_rate: number
@@ -1277,6 +1327,7 @@ export type Database = {
           quoted_at?: string | null
           share_token?: string
           status?: string
+          store_id?: string
           subtotal?: number
           tax_amount?: number
           tax_rate?: number
@@ -1313,6 +1364,7 @@ export type Database = {
           quoted_at?: string | null
           share_token?: string
           status?: string
+          store_id?: string
           subtotal?: number
           tax_amount?: number
           tax_rate?: number
@@ -1325,6 +1377,13 @@ export type Database = {
           walk_in_phone?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "quotes_store_fkey"
+            columns: ["tenant_id", "store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["tenant_id", "id"]
+          },
           {
             foreignKeyName: "quotes_customer_id_fkey"
             columns: ["customer_id"]
@@ -1344,6 +1403,219 @@ export type Database = {
             columns: ["vehicle_id"]
             isOneToOne: false
             referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      stock_levels: {
+        Row: {
+          item_id: string
+          low_stock_threshold: number | null
+          on_hand: number
+          reserved: number
+          store_id: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          item_id: string
+          low_stock_threshold?: number | null
+          on_hand?: number
+          reserved?: number
+          store_id: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          item_id?: string
+          low_stock_threshold?: number | null
+          on_hand?: number
+          reserved?: number
+          store_id?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_levels_tenant_id_item_id_fkey"
+            columns: ["tenant_id", "item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_items"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "stock_levels_tenant_id_store_id_fkey"
+            columns: ["tenant_id", "store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      stock_movements: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: number
+          item_id: string
+          note: string | null
+          on_hand_after: number
+          quantity: number
+          quote_id: string | null
+          reserved: number
+          reserved_after: number
+          store_id: string
+          tenant_id: string
+          type: string
+          unit_cost: number | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: number
+          item_id: string
+          note?: string | null
+          on_hand_after: number
+          quantity?: number
+          quote_id?: string | null
+          reserved?: number
+          reserved_after: number
+          store_id: string
+          tenant_id: string
+          type: string
+          unit_cost?: number | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: number
+          item_id?: string
+          note?: string | null
+          on_hand_after?: number
+          quantity?: number
+          quote_id?: string | null
+          reserved?: number
+          reserved_after?: number
+          store_id?: string
+          tenant_id?: string
+          type?: string
+          unit_cost?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_movements_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_tenant_id_item_id_fkey"
+            columns: ["tenant_id", "item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_items"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "stock_movements_tenant_id_store_id_fkey"
+            columns: ["tenant_id", "store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      store_item_prices: {
+        Row: {
+          item_id: string
+          selling_price: number
+          store_id: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          item_id: string
+          selling_price: number
+          store_id: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          item_id?: string
+          selling_price?: number
+          store_id?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "store_item_prices_tenant_id_item_id_fkey"
+            columns: ["tenant_id", "item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_items"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "store_item_prices_tenant_id_store_id_fkey"
+            columns: ["tenant_id", "store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      stores: {
+        Row: {
+          address: string | null
+          code: string | null
+          created_at: string
+          id: string
+          is_active: boolean
+          is_main: boolean
+          name: string
+          ntn: string | null
+          phone: string | null
+          sort_order: number
+          strn: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          code?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_main?: boolean
+          name: string
+          ntn?: string | null
+          phone?: string | null
+          sort_order?: number
+          strn?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          code?: string | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          is_main?: boolean
+          name?: string
+          ntn?: string | null
+          phone?: string | null
+          sort_order?: number
+          strn?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stores_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -2083,6 +2355,7 @@ export type Database = {
         Row: {
           accent_color: string | null
           address: string | null
+          allow_cross_store_invoicing: boolean
           allow_international_phones: boolean
           archive_reason: string | null
           archived_at: string | null
@@ -2096,6 +2369,7 @@ export type Database = {
           clock_24_hour: boolean
           clock_style: string
           created_at: string
+          cross_store_invoicing_roles: string
           currency: string
           draft_prefix: string
           draft_start_number: number
@@ -2109,6 +2383,7 @@ export type Database = {
           modules: string[]
           name: string
           ntn: string | null
+          number_per_store: boolean
           onboarding_dismissed_at: string | null
           owner_id: string | null
           packs_enabled: boolean
@@ -2134,6 +2409,7 @@ export type Database = {
         Insert: {
           accent_color?: string | null
           address?: string | null
+          allow_cross_store_invoicing?: boolean
           allow_international_phones?: boolean
           archive_reason?: string | null
           archived_at?: string | null
@@ -2147,6 +2423,7 @@ export type Database = {
           clock_24_hour?: boolean
           clock_style?: string
           created_at?: string
+          cross_store_invoicing_roles?: string
           currency?: string
           draft_prefix?: string
           draft_start_number?: number
@@ -2160,6 +2437,7 @@ export type Database = {
           modules?: string[]
           name: string
           ntn?: string | null
+          number_per_store?: boolean
           onboarding_dismissed_at?: string | null
           owner_id?: string | null
           packs_enabled?: boolean
@@ -2185,6 +2463,7 @@ export type Database = {
         Update: {
           accent_color?: string | null
           address?: string | null
+          allow_cross_store_invoicing?: boolean
           allow_international_phones?: boolean
           archive_reason?: string | null
           archived_at?: string | null
@@ -2198,6 +2477,7 @@ export type Database = {
           clock_24_hour?: boolean
           clock_style?: string
           created_at?: string
+          cross_store_invoicing_roles?: string
           currency?: string
           draft_prefix?: string
           draft_start_number?: number
@@ -2211,6 +2491,7 @@ export type Database = {
           modules?: string[]
           name?: string
           ntn?: string | null
+          number_per_store?: boolean
           onboarding_dismissed_at?: string | null
           owner_id?: string | null
           packs_enabled?: boolean
@@ -2452,6 +2733,18 @@ export type Database = {
         Returns: boolean
       }
       admin_tenant_health: { Args: { p_tenant: string }; Returns: Json }
+      admin_set_store_stock: {
+        Args: { p_item: string; p_on_hand: number; p_store: string; p_tenant: string }
+        Returns: {
+          item_id: string
+          low_stock_threshold: number | null
+          on_hand: number
+          reserved: number
+          store_id: string
+          tenant_id: string
+          updated_at: string
+        }
+      }
       admin_tenants: {
         Args: {
           p_archived?: boolean
@@ -2588,7 +2881,12 @@ export type Database = {
         }[]
       }
       dashboard_metrics: {
-        Args: { p_from?: string; p_range?: string; p_to?: string }
+        Args: {
+          p_from?: string
+          p_range?: string
+          p_store_id?: string
+          p_to?: string
+        }
         Returns: Json
       }
       document_list_totals: {
@@ -2596,6 +2894,7 @@ export type Database = {
           p_search: string
           p_status_key: string
           p_statuses: string[]
+          p_store_id?: string
           p_today: string
         }
         Returns: {
@@ -2609,6 +2908,7 @@ export type Database = {
           p_search: string
           p_status_key: string
           p_statuses: string[]
+          p_store_id?: string
           p_today: string
         }
         Returns: {
@@ -2654,6 +2954,39 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      inventory_items_at_store: {
+        Args: { p_query?: string; p_stock?: string; p_store_id: string }
+        Returns: {
+          attributes: Json
+          available_quantity: number | null
+          base_uom_id: string
+          category_id: string
+          cost_price: number
+          created_at: string
+          description: string | null
+          id: string
+          is_low_stock: boolean | null
+          is_universal: boolean
+          low_stock_threshold: number
+          name: string
+          price_includes_tax: boolean
+          purchase_uom_id: string | null
+          quantity_on_hand: number
+          reserved_quantity: number
+          sale_uom_id: string | null
+          selling_price: number
+          sku: string
+          tenant_id: string
+          updated_at: string
+          vendor_name: string | null
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "inventory_items"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       is_valid_timezone: { Args: { p_tz: string }; Returns: boolean }
       match_vehicles: {
         Args: { p_specs: Json }
@@ -2663,13 +2996,17 @@ export type Database = {
         }[]
       }
       my_modules: { Args: never; Returns: string[] }
+      my_work_stores: { Args: never; Returns: string[] }
       my_onboarding: { Args: never; Returns: Json }
       my_shop_status: { Args: never; Returns: string }
       my_status_reason: { Args: never; Returns: string }
       my_subscription: { Args: never; Returns: Json }
       my_subscription_invoice: { Args: { p_invoice: string }; Returns: Json }
       my_unpaid_notice: { Args: never; Returns: Json }
-      next_document_number: { Args: { p_prefix: string }; Returns: string }
+      next_document_number: {
+        Args: { p_prefix: string; p_store_id?: string }
+        Returns: string
+      }
       record_payment: {
         Args: {
           p_amount: number
@@ -2682,7 +3019,13 @@ export type Database = {
         Returns: string
       }
       report_data: {
-        Args: { p_from?: string; p_range?: string; p_tag?: string; p_to?: string }
+        Args: {
+          p_from?: string
+          p_range?: string
+          p_store_id?: string
+          p_tag?: string
+          p_to?: string
+        }
         Returns: Json
       }
 
@@ -2701,10 +3044,12 @@ export type Database = {
           p_name: string
           p_price_includes_tax?: boolean
           p_purchase_uom_id?: string
-          p_quantity_on_hand: number
+          p_quantity_on_hand: number | null
           p_sale_uom_id?: string
           p_selling_price: number
           p_sku: string
+          p_store_id?: string
+          p_store_settings?: Json
           p_vehicle_ids?: number[]
           p_vendor_name?: string
         }
@@ -2722,6 +3067,7 @@ export type Database = {
           p_notes?: string
           p_quote_id?: string
           p_stage?: string
+          p_store_id?: string
           p_vehicle_id?: number
           p_walk_in_name?: string
           p_walk_in_phone?: string
@@ -2839,7 +3185,7 @@ export type Database = {
         Args: { p_type_id: string }
         Returns: undefined
       }
-      shop_alerts: { Args: never; Returns: Json }
+      shop_alerts: { Args: { p_store_id?: string }; Returns: Json }
       submit_subscription_payment: {
         Args: {
           p_amount: number

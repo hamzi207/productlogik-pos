@@ -7,7 +7,7 @@ import { BulkUsersImport } from "./bulk-users-import";
 import { UserActions } from "./user-actions";
 
 /** The organization's Team manager in the console, with the superadmin's per-member tools and CSV import. */
-export function TenantTeam({ tenantId, ownerId, members }: { tenantId: string; ownerId: string | null; members: TeamRow[] }) {
+export function TenantTeam({ tenantId, ownerId, members, userLimit }: { tenantId: string; ownerId: string | null; members: TeamRow[]; userLimit: number | null }) {
   const [importing, setImporting] = useState(false);
   return (
     <div className="settings-form">
@@ -21,6 +21,7 @@ export function TenantTeam({ tenantId, ownerId, members }: { tenantId: string; o
         meId=""
         canEdit
         members={members}
+        userLimit={userLimit}
         memberTools={(m) => (
           <UserActions
             userId={m.id}

@@ -3,7 +3,7 @@ Add the MCP server to your project config using the command line.
 Code:
 File: Code
 ```
-claude mcp add --scope project --transport http supabase "https://mcp.supabase.com/mcp?project_ref=atjbxwhvtattwiivrqbe&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
+claude mcp add --scope project --transport http supabase "https://mcp.supabase.com/mcp?project_ref=sgdbhdmsvfmqxlpkrgez&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
 ```
 
 2. Authenticate

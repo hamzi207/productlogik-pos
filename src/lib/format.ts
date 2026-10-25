@@ -14,9 +14,45 @@ export function formatMoney(amount: number, { currency, showPaisa }: MoneyFormat
   return `${sign}${currency} ${digits}`;
 }
 
-/** "15 Oct 2026" in the shop's timezone (default Asia/Karachi). */
+// One date format everywhere (owner, 2026-10-25): "09 Nov 2026". Built by hand so the day always has
+// two digits and September stays "Sep" (some locales' short month is "Sept").
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const dayParts = new Map<string, Intl.DateTimeFormat>();
+
+/** "YYYY-MM-DD" for a moment, as the calendar day in `timeZone`. */
+function isoDay(value: string | Date, timeZone: string) {
+  let f = dayParts.get(timeZone);
+  if (!f) dayParts.set(timeZone, (f = new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" })));
+  const p = Object.fromEntries(f.formatToParts(new Date(value)).map((x) => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+/** "09 Nov" for a "YYYY-MM-DD" day (chart axes, ranges within one year). */
+export function formatDayMonth(day: string) {
+  const [, m, d] = day.slice(0, 10).split("-");
+  return `${d} ${MONTHS[Number(m) - 1]}`;
+}
+
+/** "09 Nov 2026" for a "YYYY-MM-DD" day (no timezone shift). */
+export function formatDay(day: string) {
+  return `${formatDayMonth(day)} ${day.slice(0, 4)}`;
+}
+
+/** "09 Nov 2026" in the shop's timezone (default Asia/Karachi). */
 export function formatDate(value: string | Date, timeZone: string) {
-  return new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone }).format(new Date(value));
+  return formatDay(isoDay(value, timeZone));
+}
+
+/** "09 Nov 2026, 14:05" in `timeZone`. */
+export function formatDateTime(value: string | Date, timeZone: string) {
+  const time = new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(value));
+  return `${formatDate(value, timeZone)}, ${time}`;
+}
+
+/** "Nov 2026" / "Nov" (month labels). */
+export function formatMonth(day: string, withYear = true) {
+  const m = MONTHS[Number(day.slice(5, 7)) - 1];
+  return withYear ? `${m} ${day.slice(0, 4)}` : m;
 }
 
 /** Gross margin as a percentage of the selling price, or null when unpriced. */

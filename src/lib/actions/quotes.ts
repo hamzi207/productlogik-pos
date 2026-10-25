@@ -5,6 +5,7 @@ import { z } from "zod";
 import { getShopSession } from "@/lib/auth";
 import { parsePhone } from "@/lib/phone";
 import { isRangePastEnd, pageRange, type Paged, type Pagination } from "@/lib/pagination";
+import { getStoreContext } from "@/lib/store";
 import { createClient } from "@/lib/supabase/server";
 import {
   localDate,
@@ -40,7 +41,7 @@ const idSchema = z.uuid();
 const stageSchema = z.enum(DOCUMENT_STAGES);
 
 const LIST_SELECT =
-  "id, quote_number, draft_number, quotation_number, status, total_amount, amount_paid, due_date, created_at, updated_at, quoted_at, invoiced_at, valid_until, walk_in_name, customers(id, name, customer_type, is_walk_in)";
+  "id, quote_number, draft_number, quotation_number, status, total_amount, amount_paid, due_date, created_at, updated_at, quoted_at, invoiced_at, valid_until, walk_in_name, store_id, customers(id, name, customer_type, is_walk_in)";
 
 // The time each section sorts and dates its documents by.
 const SECTION_DATE = {
@@ -63,6 +64,8 @@ export async function getDocuments(
   section: DocumentSection,
   filters: DocumentFilters = {},
   pagination: Pagination = { page: 1, limit: 25 },
+  /** Phase 20: one store's documents; null = every store. */
+  storeId: string | null = null,
 ): Promise<DocumentPage> {
   const { search, status } = documentFiltersSchema.parse(filters);
   const [{ tenant }, supabase] = await Promise.all([getShopSession(), createClient()]);
@@ -71,6 +74,7 @@ export async function getDocuments(
     p_status_key: status ?? "",
     p_search: search ?? "",
     p_today: localDate(tenant.timezone),
+    p_store_id: storeId ?? undefined,
   };
 
   // A builder is single-use, hence a function (the page and the past-the-end retry).
@@ -116,7 +120,7 @@ export async function getQuote(id: string): Promise<QuoteDocument | null> {
   const { data, error } = await supabase
     .from("quotes")
     .select(
-      `*, customers(id, name, customer_type, whatsapp_number, is_walk_in, default_discount_percentage, billing_address, credit_days, email), quote_items(*, inventory_items(sku, quantity_on_hand, reserved_quantity, selling_price, ${ITEM_UNITS_EMBED})), invoice_payments(*, invoice_payment_items(*))`,
+      `*, customers(id, name, customer_type, whatsapp_number, is_walk_in, default_discount_percentage, billing_address, credit_days, email), quote_items(*, inventory_items(sku, quantity_on_hand, reserved_quantity, selling_price, ${ITEM_UNITS_EMBED}, stock_levels(store_id, on_hand, reserved))), invoice_payments(*, invoice_payment_items(*))`,
     )
     .eq("id", id)
     .order("sort_order", { referencedTable: "quote_items" })
@@ -139,7 +143,16 @@ export async function getQuote(id: string): Promise<QuoteDocument | null> {
       amount: Number(p.amount),
       allocations: allocations.map((a) => ({ ...a, amount: Number(a.amount), quantity: a.quantity === null ? null : Number(a.quantity) })),
     })),
-    lines: quote_items.map(({ inventory_items: stock, ...line }) => ({
+    lines: quote_items.map(({ inventory_items: stock, ...line }) => {
+      // Phase 20: what this line could use in each store: free stock there, plus what the line holds at its source store.
+      const held = Number(line.reserved_qty) + Number(line.deducted_qty);
+      const storeStock = stock
+        ? Object.fromEntries(
+            stock.stock_levels.map((l) => [l.store_id, Number(l.on_hand) - Number(l.reserved) + (l.store_id === line.source_store_id ? held : 0)]),
+          )
+        : null;
+      if (storeStock && line.source_store_id && !(line.source_store_id in storeStock)) storeStock[line.source_store_id] = held;
+      return {
       ...line,
       quantity: Number(line.quantity),
       uom_factor: Number(line.uom_factor),
@@ -148,9 +161,11 @@ export async function getQuote(id: string): Promise<QuoteDocument | null> {
       unit_price: Number(line.unit_price),
       discount_value: Number(line.discount_value),
       sku: stock?.sku ?? null,
-      // What this line could use: free stock plus what it already holds.
-      available: stock ? Number(stock.quantity_on_hand) - Number(stock.reserved_quantity) + Number(line.reserved_qty) + Number(line.deducted_qty) : null,
-    })),
+      // What this line could use at its source store.
+      available: storeStock ? (storeStock[line.source_store_id ?? ""] ?? 0) : null,
+      store_stock: storeStock,
+      };
+    }),
   };
 }
 
@@ -214,6 +229,8 @@ export async function saveQuote(id: string | null, input: QuoteInput, stage: Doc
     p_walk_in_name: q.walkInName || undefined,
     p_walk_in_phone: walkInPhone,
     p_due_date: q.dueDate || undefined,
+    // Phase 20: new documents go to the current store; saved ones stay in theirs.
+    p_store_id: id ? undefined : (await getStoreContext()).current.id,
     p_items: q.lines.map((l) => ({
       item_id: l.itemId,
       description: l.description,
@@ -223,6 +240,7 @@ export async function saveQuote(id: string | null, input: QuoteInput, stage: Doc
       discount_type: l.discountType,
       discount_value: l.discountValue,
       uom_id: l.itemId ? (l.uomId ?? null) : null,
+      source_store_id: l.itemId ? (l.sourceStoreId ?? null) : null,
     })),
   });
   if (error) return dbError(error, "saveQuote");

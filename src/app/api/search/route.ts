@@ -4,6 +4,8 @@ import { documentHref, localDate, sectionForStatus, SECTION, statusDisplay, stat
 import { formatMoney } from "@/lib/format";
 import { formatQty } from "@/lib/uom";
 import { getShopSession } from "@/lib/auth";
+import { getStoreContext } from "@/lib/store";
+import { availableElsewhere, mapItemStock, stockAt } from "@/lib/stock";
 import { createClient } from "@/lib/supabase/server";
 
 /** One row in the Ctrl K search: where it goes and what it shows. */
@@ -30,12 +32,12 @@ export async function GET(request: NextRequest) {
   if (!parsed.success) return Response.json({ customers: [], items: [], documents: [] } satisfies SearchResponse);
   const { q } = parsed.data;
 
-  const [session, supabase] = await Promise.all([getShopSession(), createClient()]);
+  const [session, supabase, stores] = await Promise.all([getShopSession(), createClient(), getStoreContext()]);
   const money = (n: number) => formatMoney(Number(n), session.tenant.money);
 
   const [customers, items] = await Promise.all([
     supabase.rpc("search_customers", { p_query: q }).select("id, name, customer_type, whatsapp_number").eq("is_walk_in", false).order("name").limit(5),
-    supabase.rpc("search_inventory_items", { p_query: q }).select("id, name, sku, quantity_on_hand, reserved_quantity, selling_price, base_uom:units_of_measure!inventory_items_base_uom_fkey(code)").order("name").limit(5),
+    supabase.rpc("search_inventory_items", { p_query: q }).select("id, name, sku, quantity_on_hand, reserved_quantity, selling_price, base_uom:units_of_measure!inventory_items_base_uom_fkey(code), stock_levels(store_id, on_hand, reserved, low_stock_threshold)").order("name").limit(5),
   ]);
 
   // Documents: by number (draft / quotation / invoice), walk-in name, or a matching customer.
@@ -68,7 +70,14 @@ export async function GET(request: NextRequest) {
       href: `/inventory?q=${encodeURIComponent(i.sku)}`,
       title: i.name,
       detail: `${i.sku} · ${money(i.selling_price)}`,
-      badge: `${formatQty(i.quantity_on_hand - i.reserved_quantity, i.base_uom?.code)} available`,
+      // Phase 20: the current store's stock once there is more than one store.
+      badge: stores.multi
+        ? (() => {
+            const { stock } = mapItemStock({ stock_levels: i.stock_levels, store_item_prices: [] });
+            const unit = i.base_uom?.code;
+            return `Here: ${formatQty(stockAt(stock, stores.current.id).available, unit)} · Other stores: ${formatQty(availableElsewhere(stock, stores.current.id), unit)}`;
+          })()
+        : `${formatQty(i.quantity_on_hand - i.reserved_quantity, i.base_uom?.code)} available`,
     })),
     documents: docs.data.map((d) => ({
       href: documentHref(d),

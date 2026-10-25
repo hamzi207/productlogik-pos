@@ -19,6 +19,7 @@ export type CustomerOption = Pick<
 export type DocumentListItem = Pick<
   Tables<"quotes">,
   | "id"
+  | "store_id"
   | "quote_number"
   | "draft_number"
   | "quotation_number"
@@ -39,8 +40,10 @@ export type DocumentListItem = Pick<
 /** A saved line, plus what the builder needs to show it (SKU, stock it may use, units it can switch to). */
 export type QuoteDocumentLine = Tables<"quote_items"> & {
   sku: string | null;
-  /** Base units this line could use: available stock plus what the line already holds. */
+  /** Base units this line could use: available stock plus what the line already holds (at its source store). */
   available: number | null;
+  /** Phase 20: the same per store (store id → base units), null for custom lines and removed products. */
+  store_stock: Record<string, number> | null;
   /** The product's units (base first); empty for custom lines and removed products. */
   units: UnitOption[];
 };
@@ -71,6 +74,11 @@ export type PickerItem = Pick<
   units: UnitOption[];
   /** Found by scanning this pack's barcode: the line starts in that unit. */
   scan_uom_id?: string | null;
+  /**
+   * Phase 20: available stock per store (store id → base units). With `?store=`, quantity_on_hand,
+   * reserved_quantity, low_stock_threshold and selling_price are that store's.
+   */
+  store_stock: Record<string, number>;
 };
 
 /** GET /api/quote-items */

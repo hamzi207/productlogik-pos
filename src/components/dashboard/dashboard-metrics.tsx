@@ -9,6 +9,9 @@ import { parseDashboardRange, WIDGET_HINT, WIDGET_LABEL, type Widget } from "@/l
 import { formatMoney } from "@/lib/format";
 import { CustomizeDashboard } from "./customize-dashboard";
 import { DateRangePicker } from "./date-range-picker";
+import { StoreScope } from "@/components/shared/store-scope";
+import { getStoreContext, storeFilter } from "@/lib/store";
+import { ALL_STORES } from "@/lib/stores";
 import { MetricChart } from "./metric-chart";
 
 type MoneyWidget = Exclude<Widget, "counts">;
@@ -60,8 +63,11 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Sales / profit / pipeline widgets and directory counts for the chosen dates, each as numbers, bars or a pie (per user). */
 export async function DashboardMetrics({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
-  const range = parseDashboardRange(await searchParams);
-  const [{ tenant, dashboardPrefs: prefs }, m] = await Promise.all([getShopSession(), getDashboardMetrics(range)]);
+  const raw = await searchParams;
+  const range = parseDashboardRange(raw);
+  // Phase 20: the current store's figures, or every store's with ?store=all.
+  const [scope, ctx] = await Promise.all([storeFilter(raw.store), getStoreContext()]);
+  const [{ tenant, dashboardPrefs: prefs }, m] = await Promise.all([getShopSession(), getDashboardMetrics(range, scope.storeId)]);
   const money = (n: number) => formatMoney(Number(n), tenant.money);
   const show = (w: Widget) => prefs.widgets.includes(w);
   const chart = (w: Widget) => {
@@ -92,7 +98,8 @@ export async function DashboardMetrics({ searchParams }: { searchParams: Promise
           <p>In your shop&apos;s timezone; weeks start on {WEEK_START_LABEL[tenant.weekStart]}.</p>
         </div>
         <div className="metrics-actions">
-          <DateRangePicker range={range.range} from={m.from} to={m.to} today={localDate(tenant.timezone)} weekStart={tenant.weekStart} />
+          {ctx.multi && ctx.canSeeAll && <StoreScope storeName={ctx.current.name} all={scope.all} />}
+          <DateRangePicker range={range.range} from={m.from} to={m.to} today={localDate(tenant.timezone)} weekStart={tenant.weekStart} keep={scope.all && ctx.multi ? { store: ALL_STORES } : undefined} />
           <CustomizeDashboard prefs={prefs} />
         </div>
       </div>

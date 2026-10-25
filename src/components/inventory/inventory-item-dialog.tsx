@@ -10,6 +10,7 @@ import { formatMoney, marginPercent } from "@/lib/format";
 import { notify } from "@/lib/notify";
 import { applicableAttributes, asValues, attributeProblem, mergeAttributeValues, type Attribute } from "@/lib/attributes";
 import { buildCategoryIndex, skuPrefix, type Category, type CategoryIndex } from "@/lib/categories";
+import { stockAt, type StoreView } from "@/lib/stock";
 import { AttributeFields } from "@/components/categories/attribute-fields";
 import { useDiscardGuard } from "@/components/shared/discard-changes";
 import { ModalSheet } from "@/components/shared/modal-sheet";
@@ -46,12 +47,14 @@ type Props = {
   units: Unit[];
   /** Settings → Units: packs switched on (else the Packs section is hidden and existing packs kept as they are). */
   packsEnabled: boolean;
+  /** Phase 20: stock entered is the current store's; admins set store prices and low-stock levels. */
+  storeView: StoreView;
   /** Edit this item; omit to create a new one. */
   item?: InventoryListItem;
 };
 
 /** Add / edit inventory product modal (Figma "Add inventory product"). */
-export function InventoryItemDialog({ open, onOpenChange, currency, pricesIncludeTax, categories, attributes, fitment, units, packsEnabled, item }: Props) {
+export function InventoryItemDialog({ open, onOpenChange, currency, pricesIncludeTax, categories, attributes, fitment, units, packsEnabled, storeView, item }: Props) {
   // Closing with unsaved edits asks first (Cancel, X, Escape, clicking outside).
   const guard = useDiscardGuard({
     onOpenChange,
@@ -73,6 +76,7 @@ export function InventoryItemDialog({ open, onOpenChange, currency, pricesInclud
               fitment={fitment}
               units={units}
               packsEnabled={packsEnabled}
+              storeView={storeView}
               onDirtyChange={guard.setDirty}
               onDone={guard.close}
             />
@@ -93,6 +97,7 @@ function ItemForm({
   fitment,
   units,
   packsEnabled,
+  storeView,
   onDirtyChange,
   onDone,
 }: {
@@ -104,6 +109,7 @@ function ItemForm({
   fitment: boolean;
   units: Unit[];
   packsEnabled: boolean;
+  storeView: StoreView;
   onDirtyChange: (dirty: boolean) => void;
   onDone: () => void;
 }) {
@@ -111,6 +117,18 @@ function ItemForm({
   const [serverError, setServerError] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<FitmentVehicle[]>(item?.vehicles ?? []);
   const index = useMemo(() => buildCategoryIndex(categories), [categories]);
+  // Phase 20: the stock field is the current store's; store prices for admins with more than one store.
+  const here = item && storeView.multi ? stockAt(item.stock, storeView.currentId) : null;
+  const storeRows = storeView.multi && storeView.admin
+    ? storeView.stores.filter((s) => s.is_active || item?.store_prices.some((p) => p.store_id === s.id))
+    : [];
+  const storeSettings = storeRows.length
+    ? storeRows.map((s) => ({
+        storeId: s.id,
+        sellingPrice: item?.store_prices.find((p) => p.store_id === s.id)?.selling_price ?? null,
+        lowStockThreshold: item?.stock.find((l) => l.store_id === s.id)?.low_stock_threshold ?? null,
+      }))
+    : undefined;
 
   const {
     register,
@@ -131,7 +149,7 @@ function ItemForm({
           categoryId: item.category_id,
           costPrice: Number(item.cost_price),
           sellingPrice: Number(item.selling_price),
-          quantityOnHand: item.quantity_on_hand,
+          quantityOnHand: here ? here.onHand : item.quantity_on_hand,
           lowStockThreshold: item.low_stock_threshold,
           baseUomId: item.base_uom_id,
           conversions: item.conversions.map((c) => ({
@@ -146,6 +164,7 @@ function ItemForm({
           isUniversal: item.is_universal,
           vehicleIds: item.vehicles.map((v) => v.id),
           attributes: asValues(item.attributes),
+          storeSettings,
         }
       : {
           sku: "",
@@ -162,6 +181,7 @@ function ItemForm({
           isUniversal: true,
           vehicleIds: [],
           attributes: {},
+          storeSettings,
         },
   });
 
@@ -169,9 +189,9 @@ function ItemForm({
 
   const { fields: conversionFields, append: addConversion, remove: removeConversion } = useFieldArray({ control, name: "conversions" });
 
-  const [cost, selling, isUniversal, categoryId, attributeValues, baseUomId, conversions] = useWatch({
+  const [cost, selling, isUniversal, categoryId, attributeValues, baseUomId, conversions, threshold] = useWatch({
     control,
-    name: ["costPrice", "sellingPrice", "isUniversal", "categoryId", "attributes", "baseUomId", "conversions"],
+    name: ["costPrice", "sellingPrice", "isUniversal", "categoryId", "attributes", "baseUomId", "conversions", "lowStockThreshold"],
   });
   const unitById = new Map(units.map((u) => [u.id, u]));
   const baseUnit = unitById.get(baseUomId);
@@ -254,7 +274,7 @@ function ItemForm({
     onDone();
   });
 
-  const fieldError = (name: Exclude<keyof InventoryItemInput, "attributes" | "conversions">) =>
+  const fieldError = (name: Exclude<keyof InventoryItemInput, "attributes" | "conversions" | "storeSettings">) =>
     errors[name]?.message ? (
       <span className="field-error" id={`${name}-error`}>{errors[name]?.message}</span>
     ) : null;
@@ -391,15 +411,20 @@ function ItemForm({
               ))}
           </label>
           <label>
-            <span>{isEdit ? "STOCK ON HAND" : "STARTING STOCK"}</span>
+            <span>
+              {isEdit ? "STOCK ON HAND" : "STARTING STOCK"}
+              {storeView.multi ? ` AT ${storeView.currentName.toUpperCase()}` : ""}
+            </span>
             <input type="number" inputMode={baseUnit?.decimals ? "decimal" : "numeric"} step={stepFor(baseUnit?.decimals ?? 0)} min="0" {...invalid("quantityOnHand")} {...register("quantityOnHand", { valueAsNumber: true })} />
             {fieldError("quantityOnHand") ??
-              (item && item.reserved_quantity > 0 && (
-                <span className="field-note">{formatQty(item.reserved_quantity, item.base_uom?.code)} reserved on open quotations.</span>
+              (item && (here ? here.reserved : item.reserved_quantity) > 0 ? (
+                <span className="field-note">{formatQty(here ? here.reserved : item.reserved_quantity, item.base_uom?.code)} reserved on open quotations{here ? " here" : ""}.</span>
+              ) : (
+                storeView.multi && <span className="field-note">Switch store in the top bar to change another store&apos;s stock.</span>
               ))}
           </label>
           <label>
-            <span>LOW STOCK ALERT AT</span>
+            <span>LOW STOCK ALERT AT{storeRows.length ? " (DEFAULT)" : ""}</span>
             <input type="number" inputMode={baseUnit?.decimals ? "decimal" : "numeric"} step={stepFor(baseUnit?.decimals ?? 0)} min="0" {...invalid("lowStockThreshold")} {...register("lowStockThreshold", { valueAsNumber: true })} />
             {fieldError("lowStockThreshold")}
           </label>
@@ -411,6 +436,49 @@ function ItemForm({
             </div>
           </label>
         </div>
+
+        {storeRows.length > 0 && (
+          <div className="compatibility store-prices">
+            <div className="unit-packs-head">
+              <div>
+                <h3>Store prices &amp; low-stock levels</h3>
+                <p>Leave empty to use the price and alert level above. A store price replaces the price on that store&apos;s documents; packs with their own price keep it.</p>
+              </div>
+            </div>
+            <div className="store-prices-grid">
+              <span className="store-prices-head">STORE</span>
+              <span className="store-prices-head">SELLING PRICE ({currency})</span>
+              <span className="store-prices-head">LOW STOCK AT</span>
+              {storeRows.map((s, i) => {
+                const rowError = errors.storeSettings?.[i]?.sellingPrice?.message ?? errors.storeSettings?.[i]?.lowStockThreshold?.message;
+                return (
+                  <div key={s.id} className="store-prices-row">
+                    <strong>{s.name}</strong>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      aria-label={`Selling price at ${s.name}`}
+                      placeholder={Number.isFinite(selling) ? formatNumber(selling) : ""}
+                      {...register(`storeSettings.${i}.sellingPrice`, { setValueAs: (v) => (v === "" || v === null ? null : Number(v)) })}
+                    />
+                    <input
+                      type="number"
+                      inputMode={baseUnit?.decimals ? "decimal" : "numeric"}
+                      step={stepFor(baseUnit?.decimals ?? 0)}
+                      min="0"
+                      aria-label={`Low-stock level at ${s.name}`}
+                      placeholder={Number.isFinite(threshold) ? formatNumber(threshold) : ""}
+                      {...register(`storeSettings.${i}.lowStockThreshold`, { setValueAs: (v) => (v === "" || v === null ? null : Number(v)) })}
+                    />
+                    {rowError && <span className="field-error">{rowError}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {packsEnabled && (
         <div className="compatibility unit-packs">

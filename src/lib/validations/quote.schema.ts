@@ -17,6 +17,8 @@ export const quoteLineSchema = z
     itemId: z.uuid().nullable(),
     /** Inventory parts: the unit it's sold in (base unit or a conversion); null = base unit. The database checks the decimals. */
     uomId: z.uuid().nullable().optional(),
+    /** Phase 20: the store whose stock the line uses; null = the document's store. The database checks it's allowed. */
+    sourceStoreId: z.uuid().nullable().optional(),
     description: z.string().trim().min(1, "Every line needs a description.").max(300, "Keep descriptions under 300 characters."),
     isLabor: z.boolean(),
     quantity: z

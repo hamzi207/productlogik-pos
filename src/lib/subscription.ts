@@ -1,6 +1,8 @@
 // Subscriptions (Phase 17, deliverable 9): labels and date maths shared by the console, the
 // organization's Subscription page and the emails. Dates are plain "YYYY-MM-DD" strings.
 
+import { formatDay } from "./format";
+
 export type SubscriptionStatus = "trial" | "active" | "past_due" | "suspended" | "cancelled";
 export type InvoiceStatus = "unpaid" | "partly_paid" | "paid" | "void";
 export type PaymentStatus = "pending" | "verified" | "rejected" | "reversed";
@@ -51,9 +53,8 @@ export const badgeOf = <K extends string>(map: Record<K, { label: string; tone: 
 /** "PKR 1,200" (subscriptions are always billed in PKR). */
 export const pkr = (amount: number) => `PKR ${amount.toLocaleString("en-PK", { maximumFractionDigits: 2 })}`;
 
-/** "1 Nov 2026" for a "YYYY-MM-DD" date (no timezone shift). */
-export const billingDate = (value: string | null) =>
-  value ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: "UTC" }).format(new Date(`${value}T00:00:00Z`)) : "—";
+/** "01 Nov 2026" for a "YYYY-MM-DD" date (no timezone shift). */
+export const billingDate = (value: string | null) => (value ? formatDay(value) : "—");
 
 /** Today in Pakistan time as "YYYY-MM-DD" (the subscription run uses the platform's date). */
 export const billingToday = () => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi" }).format(new Date());

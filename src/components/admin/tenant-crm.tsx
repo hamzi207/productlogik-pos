@@ -3,6 +3,7 @@
 import { useState, useTransition, type CSSProperties } from "react";
 import { CalendarClock, Check, Loader2, MessageSquareText, Pencil, Plus, RotateCcw, Tags, Trash2, X } from "lucide-react";
 import { ReasonDialog } from "@/components/admin/subscription-dialogs";
+import { DateInput } from "@/components/shared/date-input";
 import {
   addFollowUp,
   addTenantNote,
@@ -147,7 +148,7 @@ export function TenantFollowUps({ tenantId, followUps }: { tenantId: string; fol
             });
           }}
         >
-          <input type="date" value={dueOn} min={today} aria-label="Follow up on" onChange={(e) => setDueOn(e.target.value)} />
+          <DateInput value={dueOn} min={today} aria-label="Follow up on" placeholder="Follow up on" onChange={(e) => setDueOn(e.target.value)} />
           <input value={reason} maxLength={300} placeholder="What to follow up on" aria-label="What to follow up on" onChange={(e) => setReason(e.target.value)} />
           <button type="submit" className="button" disabled={pending || !dueOn || !reason.trim()}><Plus size={14} /> Add</button>
         </form>

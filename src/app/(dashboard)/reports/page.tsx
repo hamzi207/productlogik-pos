@@ -5,11 +5,14 @@ import { Banknote, Boxes, Percent, ReceiptText, TrendingUp, Wallet } from "lucid
 import { getShopSession } from "@/lib/auth";
 import { parseDashboardRange, RANGE_LABEL } from "@/lib/dashboard";
 import { localDate } from "@/lib/documents";
-import { formatMoney } from "@/lib/format";
+import { formatDay, formatMoney } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { getCustomerTags } from "@/lib/customer-list-data";
 import { formatQty } from "@/lib/uom";
 import { DateRangePicker } from "@/components/dashboard/date-range-picker";
+import { StoreScope } from "@/components/shared/store-scope";
+import { getStoreContext, storeFilter } from "@/lib/store";
+import { ALL_STORES } from "@/lib/stores";
 import { CsvButton } from "@/components/reports/csv-button";
 import { ReportTagFilter } from "@/components/reports/report-tag-filter";
 import { SalesChart } from "@/components/reports/sales-chart";
@@ -39,8 +42,7 @@ type Report = {
   };
 };
 
-const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
-const day = (iso: string) => dateFmt.format(new Date(`${iso}T00:00:00Z`));
+const day = formatDay;
 const pct = (n: number) => `${n.toFixed(1)}%`;
 
 function Section({ title, hint, action, children }: { title: string; hint: string; action?: ReactNode; children: ReactNode }) {
@@ -77,11 +79,14 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
   const [{ tenant }, supabase, tags] = await Promise.all([getShopSession(), createClient(), getCustomerTags()]);
   // RF-19.2: ?tag= limits invoices, payments and money owed to customers with that tag.
   const tag = tags.find((t) => t.id === raw.tag) ?? null;
+  // Phase 20: the current store's report (its documents, stock and store prices), or every store's with ?store=all.
+  const [scope, ctx] = await Promise.all([storeFilter(raw.store), getStoreContext()]);
   const { data, error } = await supabase.rpc("report_data", {
     p_range: range.range,
     ...(range.from ? { p_from: range.from } : {}),
     ...(range.to ? { p_to: range.to } : {}),
     ...(tag ? { p_tag: tag.id } : {}),
+    ...(scope.storeId ? { p_store_id: scope.storeId } : {}),
   });
   if (error) {
     console.error("report_data failed:", error.message);
@@ -93,8 +98,10 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
   const net = Number(s.sales) - Number(s.tax);
   const profit = net - Number(s.cost);
   const period = r.from === r.to ? day(r.from) : `${day(r.from)} – ${day(r.to)}`;
-  const file = (name: string) => `${name}${tag ? `-${tag.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : ""}-${r.from}-to-${r.to}.csv`;
-  const who = tag ? ` Customers tagged ${tag.name} only.` : "";
+  const slug = (text: string) => `-${text.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const file = (name: string) => `${name}${tag ? slug(tag.name) : ""}${ctx.multi && !scope.all ? slug(ctx.current.name) : ""}-${r.from}-to-${r.to}.csv`;
+  const who = `${tag ? ` Customers tagged ${tag.name} only.` : ""}${ctx.multi ? (scope.all ? " All stores." : ` ${ctx.current.name} only.`) : ""}`;
+  const keep = { ...(tag ? { tag: tag.id } : {}), ...(scope.all && ctx.multi ? { store: ALL_STORES } : {}) };
   const aging = [
     { label: "Not yet due", ...r.aging.notDue },
     { label: "1–30 days late", ...r.aging.d30 },
@@ -111,8 +118,9 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
           <p>{period} · in your shop&apos;s timezone. Sales are invoices (including tax), not quotations.{who}</p>
         </div>
         <div className="report-filters">
+          {ctx.multi && ctx.canSeeAll && <StoreScope storeName={ctx.current.name} all={scope.all} />}
           {tags.length > 0 && <ReportTagFilter tags={tags} value={tag?.id ?? null} />}
-          <DateRangePicker range={range.range} from={r.from} to={r.to} today={localDate(tenant.timezone)} weekStart={tenant.weekStart} keep={tag ? { tag: tag.id } : undefined} />
+          <DateRangePicker range={range.range} from={r.from} to={r.to} today={localDate(tenant.timezone)} weekStart={tenant.weekStart} keep={Object.keys(keep).length ? keep : undefined} />
         </div>
       </div>
 

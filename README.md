@@ -33,7 +33,7 @@ Each organization is its own tenant. Row-level security in Postgres keeps every 
 
 ## Getting started
 
-**Prerequisites:** Node.js 22 (see `.nvmrc`) and access to the Supabase project (`atjbxwhvtattwiivrqbe`).
+**Prerequisites:** Node.js 22 (see `.nvmrc`) and access to the Supabase project (`sgdbhdmsvfmqxlpkrgez`).
 
 ```bash
 git clone https://github.com/hamzi207/productlogik-pos.git

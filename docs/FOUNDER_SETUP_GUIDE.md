@@ -121,8 +121,8 @@ All you need to do is connect your project and grab your keys.
 ---
 
 ### 4.1 Your Supabase Project Details
-- **Project Ref**: `atjbxwhvtattwiivrqbe`
-- **Project URL**: `https://atjbxwhvtattwiivrqbe.supabase.co`
+- **Project Ref**: `sgdbhdmsvfmqxlpkrgez`
+- **Project URL**: `https://sgdbhdmsvfmqxlpkrgez.supabase.co`
 
 ---
 
@@ -140,7 +140,7 @@ Run these 3 commands in your PowerShell terminal to give Claude Code direct acce
 
 #### 1. Add the Supabase MCP Server
 ```powershell
-claude mcp add --scope project --transport http supabase "https://mcp.supabase.com/mcp?project_ref=atjbxwhvtattwiivrqbe&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
+claude mcp add --scope project --transport http supabase "https://mcp.supabase.com/mcp?project_ref=sgdbhdmsvfmqxlpkrgez&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
 ```
 
 #### 2. Authenticate the MCP Server
@@ -181,9 +181,9 @@ The `.env.local` file has **already been created for you** directly in your proj
 2. It looks like this:
    ```env
    # -----------------------------------------------------------------------------
-   # SUPABASE CONFIGURATION (Project Ref: atjbxwhvtattwiivrqbe)
+   # SUPABASE CONFIGURATION (Project Ref: sgdbhdmsvfmqxlpkrgez)
    # -----------------------------------------------------------------------------
-   NEXT_PUBLIC_SUPABASE_URL=https://atjbxwhvtattwiivrqbe.supabase.co
+   NEXT_PUBLIC_SUPABASE_URL=https://sgdbhdmsvfmqxlpkrgez.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
    SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
 
@@ -221,12 +221,12 @@ Hello! I am building a B2B SaaS POS & Quoting engine for automotive accessory se
 CRITICAL CONTEXT & RESOURCES:
 1. Specification: All architectural requirements, schemas, and feature boundaries are strictly defined in PROJECT_SPEC.md.
 2. UI Source of Truth: The complete visual layout, color palette, and interactive screens have already been designed in Figma and exported to `./design/figma-ui/`. Inspect `design/figma-ui/src/App.tsx` and `src/index.css` to port these exact designs into our Next.js App Router project!
-3. Database & Supabase MCP: You are connected to Supabase project `atjbxwhvtattwiivrqbe` (URL: https://atjbxwhvtattwiivrqbe.supabase.co) via the Supabase MCP server and Agent Skills.
+3. Database & Supabase MCP: You are connected to Supabase project `sgdbhdmsvfmqxlpkrgez` (URL: https://sgdbhdmsvfmqxlpkrgez.supabase.co) via the Supabase MCP server and Agent Skills.
 
 We will build this application in 6 sequential phases as outlined in Section 7 of PROJECT_SPEC.md.
 
 YOUR INSTRUCTIONS FOR PHASE 1:
-1. AUTOMATED DATABASE SETUP: Use your Supabase MCP tools to apply the database migrations and schema directly from PROJECT_SPEC.md Section 3.1 & 3.2 to project atjbxwhvtattwiivrqbe. Deploy the atomic payment stored procedure from Section 3.3. Create the `shop-assets` public storage bucket. Verify that all 8 tables and functions exist. Do NOT ask the human to run SQL manually!
+1. AUTOMATED DATABASE SETUP: Use your Supabase MCP tools to apply the database migrations and schema directly from PROJECT_SPEC.md Section 3.1 & 3.2 to project sgdbhdmsvfmqxlpkrgez. Deploy the atomic payment stored procedure from Section 3.3. Create the `shop-assets` public storage bucket. Verify that all 8 tables and functions exist. Do NOT ask the human to run SQL manually!
 2. Initialize the Next.js App Router project (using TypeScript, Tailwind CSS, src/ directory, and import alias @/*).
 3. Install the dependencies and shadcn/ui components listed in Phase 1.
 4. Port the design tokens from `design/figma-ui/src/index.css` and the dashboard sidebar navigation from `design/figma-ui/src/App.tsx`.
@@ -451,7 +451,7 @@ The admin console is separate from the shops. Superadmins have their own account
 1. Open [`.env.local`](file:///d:/SpicedProjects/Projects/productlogik-pos/.env.local) right here in your IDE, paste your 2 API keys from Supabase, and press `Ctrl + S`.
 2. In your PowerShell terminal, run:
    ```powershell
-   claude mcp add --scope project --transport http supabase "https://mcp.supabase.com/mcp?project_ref=atjbxwhvtattwiivrqbe&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
+   claude mcp add --scope project --transport http supabase "https://mcp.supabase.com/mcp?project_ref=sgdbhdmsvfmqxlpkrgez&features=docs%2Caccount%2Cdatabase%2Cdebugging%2Cdevelopment%2Cfunctions%2Cbranching"
    claude /mcp
    ```
    *(Select `supabase` and choose Authenticate).*

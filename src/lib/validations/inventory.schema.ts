@@ -84,6 +84,20 @@ export const inventoryItemSchema = z
       .max(500, "Link at most 500 vehicles to one item."),
     /** Custom attribute values keyed by attribute key (RF-18.1); the database checks them against the definitions. */
     attributes: attributeValuesSchema,
+    /**
+     * RF-20.1 (admins, more than one store): each store's own price and low-stock level; null = the
+     * product's. Omitted = left as they are.
+     */
+    storeSettings: z
+      .array(
+        z.object({
+          storeId: z.uuid(),
+          sellingPrice: z.number({ error: "Enter a price or leave it empty." }).min(0, "Price can't be negative.").max(MAX_PRICE, "That price is too large.").nullable(),
+          lowStockThreshold: z.number({ error: "Enter a number or leave it empty." }).min(0, "The low-stock level can't be negative.").nullable(),
+        }),
+      )
+      .max(100)
+      .optional(),
   })
   .superRefine((item, ctx) => {
     if (!item.isUniversal && item.vehicleIds.length === 0) {

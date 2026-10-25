@@ -1,4 +1,5 @@
 import "server-only";
+import { sortStores } from "@/lib/stores";
 import type { Attribute } from "@/lib/attributes";
 import { buildCategoryIndex, CATEGORY_COLUMNS, fullPath, type Category } from "@/lib/categories";
 import { isRangePastEnd, pageRange, type Pagination } from "@/lib/pagination";
@@ -343,7 +344,21 @@ export type AdminProduct = Pick<
   | "attributes"
   | "updated_at"
   | "base_uom_id"
->;
+> & {
+  /** Phase 20: stock per store. */
+  stock_levels: { store_id: string; on_hand: number; reserved: number }[];
+};
+
+/** One organization's stores for the console's Products tab (stock is set per store). */
+export async function getTenantStoreOptions(tenantId: string) {
+  await requireSuperadmin();
+  const { data, error } = await createAdminClient()
+    .from("stores")
+    .select("id, name, is_main, is_active, sort_order")
+    .eq("tenant_id", tenantId);
+  if (error) throw new Error(`stores: ${error.message}`);
+  return sortStores(data);
+}
 
 /** One organization's units of measure, archived ones too (console Products tab and Settings parity). */
 export async function getTenantUnits(tenantId: string): Promise<Unit[]> {
@@ -372,7 +387,7 @@ export async function getTenantProducts(tenantId: string, filters: { q: string; 
   const admin = createAdminClient();
   let query = admin
     .from("inventory_items")
-    .select("id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, price_includes_tax, is_universal, attributes, updated_at, base_uom_id", { count: "exact" })
+    .select("id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, price_includes_tax, is_universal, attributes, updated_at, base_uom_id, stock_levels(store_id, on_hand, reserved)", { count: "exact" })
     .eq("tenant_id", tenantId);
   // Characters PostgREST's or() filter would read as syntax.
   const q = filters.q.replace(/[%,()*\\]/g, " ").trim();
@@ -381,7 +396,11 @@ export async function getTenantProducts(tenantId: string, filters: { q: string; 
   const { from, to } = pageRange(pagination);
   const { data, count, error } = await query.order("name").range(from, to);
   if (error && !isRangePastEnd(error)) throw new Error(`inventory_items: ${error.message}`);
-  return { rows: (data ?? []) as AdminProduct[], total: count ?? 0, ...pagination };
+  const rows = ((data ?? []) as AdminProduct[]).map((p) => ({
+    ...p,
+    stock_levels: p.stock_levels.map((l) => ({ ...l, on_hand: Number(l.on_hand), reserved: Number(l.reserved) })),
+  }));
+  return { rows, total: count ?? 0, ...pagination };
 }
 
 /** One organization's customer types, tags and customers per tag (console parity for Settings → Customers). */

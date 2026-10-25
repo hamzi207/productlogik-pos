@@ -6,6 +6,7 @@ import type { Attribute } from "@/lib/attributes";
 import { buildCategoryIndex, categoryIcon, fullPath, shortPath, type Category } from "@/lib/categories";
 import { formatMoney, formatVehicleGroups, marginPercent, type MoneyFormat } from "@/lib/format";
 import type { InventoryPage } from "@/lib/actions/inventory";
+import { priceAt, stockAt, type StoreView } from "@/lib/stock";
 import type { InventoryListItem } from "@/lib/types/inventory";
 import { formatQty, type Unit } from "@/lib/uom";
 import { CategoryBadge } from "@/components/categories/category-tree";
@@ -13,6 +14,7 @@ import { PaginationBar } from "@/components/ui/pagination-bar";
 import { DeleteItemDialog } from "./delete-item-dialog";
 import { InventoryItemDetails } from "./inventory-item-details";
 import { InventoryItemDialog } from "./inventory-item-dialog";
+import { OtherStoresStock } from "./store-stock";
 
 type Props = {
   /** One page of parts + totals for everything matching the filters. */
@@ -30,6 +32,8 @@ type Props = {
   fitment: boolean;
   /** True when a search/category/stock/fitment filter is active (changes the empty state). */
   filtered: boolean;
+  /** Phase 20: with more than one store, stock and prices show for the current store. */
+  storeView: StoreView;
 };
 
 function FitmentBadge({ item }: { item: InventoryListItem }) {
@@ -76,23 +80,33 @@ function MarginBadge({ cost, selling }: { cost: number; selling: number }) {
 export const availableOf = (item: Pick<InventoryListItem, "quantity_on_hand" | "reserved_quantity">) =>
   item.quantity_on_hand - item.reserved_quantity;
 
-function StockCell({ item }: { item: InventoryListItem }) {
-  const available = availableOf(item);
-  const low = available <= item.low_stock_threshold;
+/** The stock the row shows: the current store's with more than one store, else the totals. */
+export function shownStock(item: InventoryListItem, view: StoreView) {
+  if (!view.multi) {
+    return { onHand: item.quantity_on_hand, reserved: item.reserved_quantity, available: availableOf(item), threshold: item.low_stock_threshold };
+  }
+  const at = stockAt(item.stock, view.currentId);
+  return { ...at, threshold: at.threshold ?? item.low_stock_threshold };
+}
+
+function StockCell({ item, view }: { item: InventoryListItem; view: StoreView }) {
+  const { onHand, reserved, available, threshold } = shownStock(item, view);
+  const low = available <= threshold;
   const unit = item.base_uom?.code;
   return (
     <div className="stock-cell">
       {low ? (
-        <span className="badge badge-red" title={`Alert level: ${formatQty(item.low_stock_threshold, unit)}`}>
+        <span className="badge badge-red" title={`Alert level: ${formatQty(threshold, unit)}`}>
           <AlertTriangle size={12} />
-          {available <= 0 ? "None available" : `${formatQty(available, unit)} available`} · Min {formatQty(item.low_stock_threshold)}
+          {available <= 0 ? "None available" : `${formatQty(available, unit)} available`} · Min {formatQty(threshold)}
         </span>
       ) : (
         <span className="badge badge-green">{formatQty(available, unit)} available</span>
       )}
       <span className="stock-split">
-        {formatQty(item.quantity_on_hand, unit)} on hand{item.reserved_quantity > 0 ? ` · ${formatQty(item.reserved_quantity)} reserved` : ""}
+        {formatQty(onHand, unit)} on hand{reserved > 0 ? ` · ${formatQty(reserved)} reserved` : ""}
       </span>
+      {view.multi && <OtherStoresStock stock={item.stock} view={view} unit={unit} />}
     </div>
   );
 }
@@ -101,7 +115,7 @@ function StockCell({ item }: { item: InventoryListItem }) {
 const perUnit = (item: InventoryListItem) =>
   item.base_uom && item.base_uom.code.toLowerCase() !== "pcs" ? ` · per ${item.base_uom.code}` : "";
 
-export function InventoryTable({ result, money, pricesIncludeTax, categories, attributes, units, packsEnabled, fitment, filtered }: Props) {
+export function InventoryTable({ result, money, pricesIncludeTax, categories, attributes, units, packsEnabled, fitment, filtered, storeView }: Props) {
   const items = result.rows;
   const index = useMemo(() => buildCategoryIndex(categories), [categories]);
   const [editing, setEditing] = useState<InventoryListItem | null>(null);
@@ -116,6 +130,7 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
       <div className="inventory-summary">
         <div>
           <h2>{filtered ? "Matching inventory" : "All inventory"}</h2>
+          {storeView.multi && <span className="badge badge-blue">Stock at {storeView.currentName}</span>}
           <span className="badge">{result.total} {result.total === 1 ? "product" : "products"}</span>
           {lowStock > 0 && (
             <span className="badge badge-red">
@@ -165,8 +180,10 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
                 const category = index.byId.get(item.category_id);
                 const Icon = categoryIcon(category);
                 const cost = Number(item.cost_price);
-                const selling = Number(item.selling_price);
-                const low = availableOf(item) <= item.low_stock_threshold;
+                const selling = storeView.multi ? priceAt(item, storeView.currentId) : Number(item.selling_price);
+                const ownPrice = storeView.multi && selling !== Number(item.selling_price);
+                const shown = shownStock(item, storeView);
+                const low = shown.available <= shown.threshold;
                 return (
                   <tr key={item.id} className={low ? "low-stock-row" : undefined}>
                     <td>
@@ -189,9 +206,10 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
                     <td className="amount">
                       {formatMoney(selling, money)}
                       <span className="price-tax-note">{item.price_includes_tax ? "incl. tax" : "+ tax"}{perUnit(item)}</span>
+                      {ownPrice && <span className="price-tax-note" title={`Product price ${formatMoney(Number(item.selling_price), money)}`}>Store price</span>}
                     </td>
                     <td><MarginBadge cost={cost} selling={selling} /></td>
-                    <td><StockCell item={item} /></td>
+                    <td><StockCell item={item} view={storeView} /></td>
                     <td>
                       <div className="row-actions">
                         <button type="button" className="icon-button" aria-label={`Edit ${item.name}`} onClick={() => setEditing(item)}>
@@ -216,14 +234,15 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
           <ul className="mobile-cards" aria-label="Products">
             {items.map((item) => {
               const category = index.byId.get(item.category_id);
-              const available = availableOf(item);
-              const low = available <= item.low_stock_threshold;
+              const shown = shownStock(item, storeView);
+              const available = shown.available;
+              const low = available <= shown.threshold;
               return (
                 <li key={item.id} className={`mobile-card${low ? " low" : ""}`}>
                   <button type="button" className="mobile-card-main" onClick={() => setViewing(item)} aria-label={`Details for ${item.name}`}>
                     <span className="mobile-card-top">
                       <span className="mono">{item.sku}</span>
-                      <strong className="amount">{formatMoney(Number(item.selling_price), money)}</strong>
+                      <strong className="amount">{formatMoney(storeView.multi ? priceAt(item, storeView.currentId) : Number(item.selling_price), money)}</strong>
                     </span>
                     <span className="mobile-card-title">{item.name}</span>
                     <span className="mobile-card-meta">
@@ -231,7 +250,8 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
                       <span className={`badge ${low ? "badge-red" : "badge-green"}`}>
                         {low && <AlertTriangle size={11} />}
                         {available <= 0 ? "None available" : `${formatQty(available, item.base_uom?.code)} available`}
-                        {item.reserved_quantity > 0 ? ` · ${formatQty(item.reserved_quantity)} reserved` : ""}
+                        {shown.reserved > 0 ? ` · ${formatQty(shown.reserved)} reserved` : ""}
+                        {storeView.multi ? " here" : ""}
                       </span>
                     </span>
                   </button>
@@ -266,6 +286,7 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
         units={units}
         packsEnabled={packsEnabled}
         fitment={fitment}
+        storeView={storeView}
         item={editing ?? undefined}
       />
       <DeleteItemDialog item={deleting} onOpenChange={(open) => !open && setDeleting(null)} />
@@ -275,6 +296,7 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
         attributes={attributes}
         fitment={fitment}
         packsEnabled={packsEnabled}
+        storeView={storeView}
         categoryLabel={viewing ? (() => { const c = index.byId.get(viewing.category_id); return c ? fullPath(c) : "—"; })() : ""}
         onOpenChange={(open) => !open && setViewing(null)}
         onEdit={(item) => {

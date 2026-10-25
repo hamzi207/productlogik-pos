@@ -5,6 +5,7 @@ import { ArrowDown, ArrowUp, Minus, Plus, Trash2 } from "lucide-react";
 import { formatMoney, type MoneyFormat } from "@/lib/format";
 import { notify } from "@/lib/notify";
 import { lineAmounts, round2, unitDiscount, type DiscountType } from "@/lib/quote-math";
+import { bestElsewhere, SINGLE_DOCUMENT_STORE, type DocumentStores } from "@/lib/stock";
 import type { PickerItem } from "@/lib/types/quote";
 import { fitsDecimals, formatQty, stepFor, type UnitOption } from "@/lib/uom";
 import { LineSearch, type CategoryChip } from "./line-search";
@@ -37,6 +38,10 @@ export type BuilderLine = {
   uomDecimals: number;
   /** Units a part line can switch to (base first); empty for custom items. */
   units: UnitOption[];
+  /** Phase 20: the store whose stock the line uses; null = the document's store. */
+  sourceStoreId: string | null;
+  /** What the line could use in each store (store id → base units); null for custom items. */
+  storeStock: Record<string, number> | null;
 };
 
 type Props = {
@@ -50,6 +55,8 @@ type Props = {
   categories: CategoryChip[];
   /** The product search also matches linked vehicles (Vehicle Fitment module on). */
   vehicleSearch: boolean;
+  /** Phase 20: the document's store and what its lines may do. */
+  stores?: DocumentStores;
 };
 
 const numberValue = (n: number) => (Number.isFinite(n) ? n : "");
@@ -80,9 +87,45 @@ function unitPatch(line: BuilderLine, id: string): Partial<BuilderLine> {
 /** Over the stock it can use? Stock is in base units; the line may be in packs. */
 const isShort = (line: BuilderLine) => line.itemId !== null && line.stock !== null && line.quantity * line.uomFactor > line.stock + 1e-9;
 
-/** "Only 4 pcs available" / "None available". */
-const shortLabel = (line: BuilderLine) =>
-  line.stock! <= 0 ? "None available" : `Only ${formatQty(line.stock!, line.units[0]?.code)} available`;
+/** "Only 4 pcs available" / "None available"; with stores: "Only 2 here · 15 at Store B". */
+function shortLabel(line: BuilderLine, stores: DocumentStores) {
+  const unit = line.units[0]?.code;
+  if (!stores.multi) return line.stock! <= 0 ? "None available" : `Only ${formatQty(line.stock!, unit)} available`;
+  const source = line.sourceStoreId ?? stores.docStoreId;
+  const where = source === stores.docStoreId ? "here" : `at ${stores.names[source] ?? "that store"}`;
+  const head = line.stock! <= 0 ? `None ${where}` : `Only ${formatQty(line.stock!, unit)} ${where}`;
+  const other = bestElsewhere(line.storeStock, source);
+  return other ? `${head} · ${formatQty(other.available, unit)} at ${stores.names[other.storeId] ?? "another store"}` : head;
+}
+
+/** Switching the store a line takes its stock from. */
+const sourcePatch = (line: BuilderLine, storeId: string, stores: DocumentStores): Partial<BuilderLine> => ({
+  sourceStoreId: storeId === stores.docStoreId ? null : storeId,
+  stock: line.storeStock?.[storeId] ?? 0,
+});
+
+/**
+ * "From: Store B" for a part line: a picker when the organization allows selling other stores' stock,
+ * else (a line saved from another store earlier) a label. Nothing with one store.
+ */
+function SourceControl({ line, stores, readOnly, onChange, className = "line-source-select" }: { line: BuilderLine; stores: DocumentStores; readOnly: boolean; onChange: (patch: Partial<BuilderLine>) => void; className?: string }) {
+  if (!stores.multi || line.itemId === null) return null;
+  const source = line.sourceStoreId ?? stores.docStoreId;
+  if (!stores.crossStore || readOnly) {
+    return source === stores.docStoreId ? null : <span className="line-tag line-source">From {stores.names[source] ?? "another store"}</span>;
+  }
+  const choices = stores.active.includes(source) ? stores.active : [source, ...stores.active];
+  const unit = line.units[0]?.code;
+  return (
+    <select className={className} value={source} onChange={(e) => onChange(sourcePatch(line, e.target.value, stores))} aria-label="Take stock from">
+      {choices.map((id) => (
+        <option key={id} value={id}>
+          {id === stores.docStoreId ? "From this store" : `From ${stores.names[id] ?? "another store"}`} · {formatQty(line.storeStock?.[id] ?? 0, unit)}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 /** The unit picker for a part line (a label when it has only one unit). */
 function UnitControl({ line, readOnly, onChange, className = "line-unit-select" }: { line: BuilderLine; readOnly: boolean; onChange: (patch: Partial<BuilderLine>) => void; className?: string }) {
@@ -121,7 +164,7 @@ const salePrice = (line: BuilderLine) => round2(line.unitPrice - unitDiscount(li
  * (Rs.) discount. Line total = qty × sale price.
  * Below 768px the table becomes touch cards; tapping one opens an edit sheet.
  */
-export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly, categories, vehicleSearch }: Props) {
+export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly, categories, vehicleSearch, stores = SINGLE_DOCUMENT_STORE }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const update = (key: string, patch: Partial<BuilderLine>) =>
     onChange((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
@@ -156,7 +199,7 @@ export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly
           </p>
         </div>
       </div>
-      {!readOnly && <LineSearch money={money} addedIds={addedIds} onAdd={onAdd} onAddCustom={onAddCustom} categories={categories} vehicleSearch={vehicleSearch} />}
+      {!readOnly && <LineSearch money={money} addedIds={addedIds} onAdd={onAdd} onAddCustom={onAddCustom} categories={categories} vehicleSearch={vehicleSearch} stores={stores} />}
 
       {lines.length > 0 && (
         <div className="doc-table" role="table" aria-label="Line items">
@@ -209,7 +252,8 @@ export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly
                     <>
                       <strong className="product-title" title={line.description}>{line.description}</strong>
                       <span className="mono">{line.sku ?? "Removed from inventory"}</span>
-                      {short && <span className="stock-low">{shortLabel(line)}</span>}
+                      <SourceControl line={line} stores={stores} readOnly={readOnly} onChange={(patch) => update(line.key, patch)} />
+                      {short && <span className="stock-low">{shortLabel(line, stores)}</span>}
                     </>
                   )}
                 </div>
@@ -339,6 +383,7 @@ export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly
               key={line.key}
               line={line}
               money={money}
+              stores={stores}
               readOnly={readOnly}
               onStep={(by) => update(line.key, { quantity: stepQuantity(line, by) })}
               onEdit={() => setEditing(line.key)}
@@ -352,6 +397,7 @@ export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly
         <LineEditSheet
           line={editLine}
           money={money}
+          stores={stores}
           onClose={() => setEditing(null)}
           onUpdate={(patch) => update(editLine.key, patch)}
           onRemove={() => remove(editLine.key)}
@@ -371,6 +417,7 @@ function discountLabel(line: BuilderLine, money: MoneyFormat) {
 function MobileLineCard({
   line,
   money,
+  stores,
   readOnly,
   onStep,
   onEdit,
@@ -378,6 +425,7 @@ function MobileLineCard({
 }: {
   line: BuilderLine;
   money: MoneyFormat;
+  stores: DocumentStores;
   readOnly: boolean;
   onStep: (by: 1 | -1) => void;
   onEdit: () => void;
@@ -400,7 +448,8 @@ function MobileLineCard({
           {discount && <span className="discount-amount"> {discount}</span>}
         </span>
         {amounts.invalid && <span className="stock-out">Discount too large</span>}
-        {short && <span className="stock-low">{shortLabel(line)}</span>}
+        {stores.multi && line.sourceStoreId && <span className="line-tag line-source">From {stores.names[line.sourceStoreId] ?? "another store"}</span>}
+        {short && <span className="stock-low">{shortLabel(line, stores)}</span>}
       </span>
     </>
   );
@@ -438,12 +487,14 @@ function MobileLineCard({
 function LineEditSheet({
   line,
   money,
+  stores,
   onClose,
   onUpdate,
   onRemove,
 }: {
   line: BuilderLine;
   money: MoneyFormat;
+  stores: DocumentStores;
   onClose: () => void;
   onUpdate: (patch: Partial<BuilderLine>) => void;
   onRemove: () => void;
@@ -512,6 +563,14 @@ function LineEditSheet({
             <UnitControl line={line} readOnly={false} onChange={onUpdate} className="field-input" />
           </label>
         )}
+
+        {!custom && stores.multi && stores.crossStore && (
+          <label className="line-edit-row">
+            <span className="field-label">STOCK FROM</span>
+            <SourceControl line={line} stores={stores} readOnly={false} onChange={onUpdate} className="field-input" />
+          </label>
+        )}
+        {!custom && isShort(line) && <p className="field-note stock-low">{shortLabel(line, stores)}</p>}
 
         <label className="line-edit-row">
           <span className="field-label">{!custom && line.uomLabel ? `PRICE PER ${line.uomLabel.toUpperCase()}` : "UNIT PRICE"}</span>

@@ -1,6 +1,7 @@
 import { getShopSession } from "@/lib/auth";
 import { formatMoney } from "@/lib/format";
 import { formatQty } from "@/lib/uom";
+import { getStoreContext } from "@/lib/store";
 import { createClient } from "@/lib/supabase/server";
 
 export type AlertTone = "red" | "amber" | "blue";
@@ -22,10 +23,11 @@ const REQUEST_RESULT_DAYS = 14;
  * the outcome of the caller's own category requests from the last two weeks.
  */
 export async function GET() {
-  const [session, supabase] = await Promise.all([getShopSession(), createClient()]);
+  const [session, supabase, stores] = await Promise.all([getShopSession(), createClient(), getStoreContext()]);
   const since = new Date(Date.now() - REQUEST_RESULT_DAYS * 86_400_000).toISOString();
   const [{ data, error }, { data: requests, error: requestError }] = await Promise.all([
-    supabase.rpc("shop_alerts"),
+    // Phase 20: the current store's due invoices, expiring quotations and low stock.
+    supabase.rpc("shop_alerts", stores.multi ? { p_store_id: stores.current.id } : {}),
     supabase
       .from("category_requests")
       .select("id, name, status, resolution_note, resolved_at")

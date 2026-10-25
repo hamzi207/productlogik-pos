@@ -99,7 +99,7 @@ export type PrintableDocument = {
 };
 
 const SELECT =
-  "*, customers(name, contact_person, whatsapp_number, phone, email, billing_address, cnic_or_ntn, strn, is_walk_in), quote_items(*, inventory_items(sku, category_id, attributes)), invoice_payments(*, invoice_payment_items(description, quantity)), tenants(industry_id, name, address, phone, email, ntn, strn, logo_url, accent_color, quote_footer_notes, invoice_terms, bank_name, bank_account_title, bank_account_number, bank_iban, bank_raast_id, bank_wallets, currency, show_paisa, timezone)";
+  "*, customers(name, contact_person, whatsapp_number, phone, email, billing_address, cnic_or_ntn, strn, is_walk_in), quote_items(*, inventory_items(sku, category_id, attributes)), invoice_payments(*, invoice_payment_items(description, quantity)), tenants(industry_id, name, address, phone, email, ntn, strn, logo_url, accent_color, quote_footer_notes, invoice_terms, bank_name, bank_account_title, bank_account_number, bank_iban, bank_raast_id, bank_wallets, currency, show_paisa, timezone), stores!quotes_store_fkey(name, address, phone, ntn, strn)";
 
 const TITLE: Record<DocumentSection, string> = { drafts: "Estimate", quotations: "Quotation", invoices: "Invoice" };
 
@@ -128,8 +128,13 @@ export async function loadPrintable(
   const key = statusKey(q, localDate(tz));
   const walkIn = Boolean(c?.is_walk_in);
 
+  // Phase 20: with more than one store the document names its store, and the store's own address, phone
+  // and tax numbers (when set) replace the business profile's.
+  const store = q.stores;
+  const { count: storeCount } = await supabase.from("stores").select("id", { count: "exact", head: true }).eq("tenant_id", q.tenant_id).eq("is_active", true);
   const dates = [
     { label: "Date", value: day(section === "invoices" ? q.invoiced_at : section === "quotations" ? q.quoted_at : q.created_at) },
+    { label: "Store", value: store && (storeCount ?? 0) > 1 ? store.name : null },
     { label: "Valid until", value: section === "quotations" ? day(q.valid_until) : null },
     { label: "Due date", value: section === "invoices" ? day(q.due_date) : null },
   ].filter((d): d is { label: string; value: string } => Boolean(d.value));
@@ -190,11 +195,11 @@ export async function loadPrintable(
     dates,
     shop: {
       name: t.name,
-      address: t.address,
-      phone: t.phone ? formatPhone(t.phone) : null,
+      address: store?.address || t.address,
+      phone: store?.phone ? formatPhone(store.phone) : t.phone ? formatPhone(t.phone) : null,
       email: t.email,
-      ntn: t.ntn,
-      strn: t.strn ? formatStrn(t.strn) : null,
+      ntn: store?.ntn || t.ntn,
+      strn: store?.strn ? formatStrn(store.strn) : t.strn ? formatStrn(t.strn) : null,
       logoUrl: t.logo_url,
       accent: documentAccent(t.accent_color),
       terms: section === "invoices" ? t.invoice_terms : t.quote_footer_notes,

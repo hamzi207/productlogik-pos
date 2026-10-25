@@ -6,12 +6,14 @@ import { dashboardPrefsSchema, type DashboardMetrics, type DashboardPrefs, type 
 import { createClient } from "@/lib/supabase/server";
 
 /** Sales, profit and pipeline figures for one date range, in the shop's timezone (RPC dashboard_metrics). */
-export async function getDashboardMetrics({ range, from, to }: DashboardRange): Promise<DashboardMetrics> {
+export async function getDashboardMetrics({ range, from, to }: DashboardRange, storeId: string | null = null): Promise<DashboardMetrics> {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("dashboard_metrics", {
     p_range: range,
     ...(from ? { p_from: from } : {}),
     ...(to ? { p_to: to } : {}),
+    // Phase 20: one store's figures; null = every store.
+    ...(storeId ? { p_store_id: storeId } : {}),
   });
   if (error) {
     console.error("getDashboardMetrics failed:", error.message);

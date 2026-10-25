@@ -886,3 +886,59 @@ Test steps:
   6b. Switch packs off (a note explains packs are kept), then Save Settings: the product dialog has no
       Packs section and new lines use pcs.
   7. Commit: git add . && git commit -m "Phase 19 - units of measure, decimal quantities, customer types and tags"
+
+Phase 20 (Version 2: multiple stores and per-store stock), 2026-10-25 (migrations applied 2026-10-25; moved to the Frankfurt database 2026-10-26; tested by the owner and committed 2026-10-26):
+  - Stores: every organization gets a Main Store (V1 stock, documents and members move into it, so a
+    single-store shop sees no change). Settings → Stores: add / edit / switch off stores (code, address,
+    phone, NTN, STRN for that store's documents), who works where, and a default store per staff member.
+  - Stock is kept per store (stock_levels) and every change goes through one function that writes the
+    stock ledger (stock_movements; its screen is Phase 24). Item totals stay the sum of the stores.
+  - Top-bar store switcher; new documents go to the current store and use its stock. Everyone sees every
+    store's stock: inventory "Other stores: N" with a per-store table, details panel table, search hints
+    ("Only 2 here · 15 at Store B"). Low-stock alerts per store.
+  - Optional "Allow invoicing from other stores' stock" (admins only, or everyone): a line can take its
+    stock "From" another store. Checked in SQL.
+  - RF-20.1: store prices and per-store low-stock levels in the product dialog (admins).
+  - RF-20.2: "Number documents per store" (LHR1-INV-1001), each store continuing its own series.
+  - Lists, dashboard and reports show the current store, with "All stores" for admins.
+  - Console: organization tab Stores; Products tab sets stock per store; plan usage counts stores.
+  - Rev 11: stores and users are part of the subscription. Organization admins add stores / invite users
+    only up to its limits and edit them; deleting stores and switching them off / on is console-only.
+  - Settings tab bars stay on one row; Printing + POS became "Tax & Printing"; card gaps on Stores,
+    Customers and Subscription; Subscription's billing dates always shown.
+Typecheck and lint pass. Migrations 20261025060617_phase20_stores, 20261025061033_phase20_documents,
+20261025061231_phase20_store_filters, 20261025113733_phase20_store_access,
+20261025133202_phase20_invoice_facts and 20261025135431_phase20_invoice_due_date applied 2026-10-25
+(stock, documents and lines unchanged); 15 rolled-back SQL checks pass, plus 8 for who may add / switch
+off / delete stores and 6 for a saved invoice (staff swap the customer, never remove it; only admins and
+the console move the due date).
+
+Test steps:
+  1. Nothing looks different yet: inventory stock, documents and numbers are as before (one store).
+  2. Settings → Stores → + Store: "Liberty Market", code LHR2. The top bar now shows the store switcher.
+  3. Inventory: the stock column says Main Store's stock and "Other stores: 0". Switch to Liberty Market
+     (top bar), edit a product: STOCK ON HAND AT LIBERTY MARKET = 5, set a store price. Save.
+  4. Switch back to Main Store: the product shows "Other stores: 5"; click it for the per-store table.
+  5. New invoice in Main Store for more than Main Store has: the line says "Only N here · 5 at Liberty Market"
+     and saving is refused.
+  6. Settings → Stores → Allow invoicing from other stores' stock → Save Settings. The line now has a
+     "From" select: pick Liberty Market and save. Liberty Market's stock drops, Main Store's doesn't.
+  7. Switch to Liberty Market, new quotation: the line starts at the store price.
+  8. Open the Main Store invoice while in Liberty Market: it asks to switch store before changing it.
+  9. Number documents per store (give Main Store a code first): the next invoice is LHR2-INV-1001 in
+     Liberty Market. Invoices list: This store | All stores; All stores shows a Store column.
+ 10. Console → Organizations → your shop → Stores: the same cards; Products tab: STOCK AT select.
+ 11. Subscription limits: console → your shop → Subscription → set the store limit to 2. Settings → Stores
+     says "The subscription includes 2 stores: 2 open", the + Store button is gone and a note says to
+     request a plan change. Shop admins have no delete button or Open switch; the console has both.
+     Same on Team with a user limit. Put the limits back afterwards.
+ 12. Laptop width: the Settings tab bar stays on one row (icons drop first, then labels shorten); the
+     console's organization tabs too. Tax & Printing shows the Tax and Print format cards.
+     New invoice for Hamza Traders (15 credit days): Due date reads "09 Nov 2026" and the calendar
+     still opens on click. Every date in lists, documents and the console reads like "09 Nov 2026".
+     Dropdowns all look alike (Settings → Stores "Who can do it", inventory filters, dialogs), in light
+     and dark. Invoices list: "Main Store | All stores" is a bordered toggle in its own bar.
+     Open a saved invoice: the customer has a "Change" button, not ×; Change → search, "Keep current"
+     goes back, picking another customer swaps it. As staff the due date is read-only (and stays put
+     when the customer changes); as an admin it can still be changed.
+ 13. Commit: git add . && git commit -m "Phase 20 - multiple stores, per-store stock, store prices and numbering"

@@ -5,6 +5,7 @@ import { Box, Check, Loader2, PenLine, Plus, Search } from "lucide-react";
 import { colorStyle } from "@/lib/category-colors";
 import { formatMoney, type MoneyFormat } from "@/lib/format";
 import { LOOKUP_DELAY_MS } from "@/lib/search-delay";
+import { SINGLE_DOCUMENT_STORE, type DocumentStores } from "@/lib/stock";
 import { formatQty } from "@/lib/uom";
 import type { PickerItem, PickerItemsResponse } from "@/lib/types/quote";
 import { MobileSheet } from "./mobile-sheet";
@@ -22,23 +23,40 @@ type Props = {
   categories: CategoryChip[];
   /** The search also matches linked vehicles (Vehicle Fitment module on). */
   vehicleSearch: boolean;
+  /** Phase 20: stock and prices are the document store's; other stores' stock is named. */
+  stores?: DocumentStores;
 };
 
-/** Available = on hand − reserved on open quotations. */
-function Stock({ item }: { item: PickerItem }) {
+/** Available = on hand − reserved on open quotations (at the document's store, with more than one). */
+function Stock({ item, stores }: { item: PickerItem; stores: DocumentStores }) {
   const available = item.quantity_on_hand - item.reserved_quantity;
   const unit = item.units[0]?.code;
   const reserved = item.reserved_quantity > 0 ? ` · ${formatQty(item.reserved_quantity)} reserved` : "";
   const tone = available <= 0 ? "stock-out" : available <= item.low_stock_threshold ? "stock-low" : "in-stock";
-  return <span className={tone}>{available <= 0 ? "None available" : `${formatQty(available, unit)} available`}{reserved}</span>;
+  const here = stores.multi ? " here" : "";
+  // "Other stores: 15", with each store's figure on hover.
+  const others = stores.multi ? Object.entries(item.store_stock).filter(([id, n]) => id !== stores.docStoreId && n > 0) : [];
+  const elsewhere = others.reduce((sum, [, n]) => sum + n, 0);
+  return (
+    <span className={tone}>
+      {available <= 0 ? `None available${here}` : `${formatQty(available, unit)} available${here}`}
+      {reserved}
+      {elsewhere > 0 && (
+        <span className="stock-elsewhere" title={others.map(([id, n]) => `${stores.names[id] ?? "Store"}: ${formatQty(n, unit)}`).join("\n")}>
+          {" "}· Other stores: {formatQty(elsewhere, unit)}
+        </span>
+      )}
+    </span>
+  );
 }
 
 /** Products matching the query (and category), fetched while `enabled`, 200ms after the last keystroke. */
-function usePartSearch(enabled: boolean, query: string, category: string | null) {
+function usePartSearch(enabled: boolean, query: string, category: string | null, store: string | null) {
   const q = query.trim();
   const params = new URLSearchParams();
   if (q) params.set("q", q);
   if (category) params.set("category", category);
+  if (store) params.set("store", store);
   const request = `/api/quote-items${params.size ? `?${params}` : ""}`;
   const [active, setActive] = useState(0);
   const [result, setResult] = useState<{ request: string; items: PickerItem[]; error: string | null }>({
@@ -74,13 +92,13 @@ function usePartSearch(enabled: boolean, query: string, category: string | null)
  * to add it. Anything not in inventory can be added as a custom item.
  * On phones the box opens a full-screen search sheet instead.
  */
-export function LineSearch({ money, addedIds, onAdd, onAddCustom, categories, vehicleSearch }: Props) {
+export function LineSearch({ money, addedIds, onAdd, onAddCustom, categories, vehicleSearch, stores = SINGLE_DOCUMENT_STORE }: Props) {
   const listId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const { q, items, error, loading, active, setActive } = usePartSearch(open, query, null);
+  const { q, items, error, loading, active, setActive } = usePartSearch(open, query, null, stores.multi ? stores.docStoreId : null);
   // The last option adds the typed text as a custom item.
   const optionCount = items.length + 1;
 
@@ -159,6 +177,7 @@ export function LineSearch({ money, addedIds, onAdd, onAddCustom, categories, ve
         onAddCustom={onAddCustom}
         categories={categories}
         vehicleSearch={vehicleSearch}
+        stores={stores}
       />
 
       {open && (
@@ -177,7 +196,7 @@ export function LineSearch({ money, addedIds, onAdd, onAddCustom, categories, ve
               <span className="product-thumbnail"><Box size={15} /></span>
               <span className="line-search-info">
                 <strong className="product-title">{item.name}</strong>
-                <span><span className="mono">{item.sku}</span> · {item.category?.name ?? "Uncategorised"} · <Stock item={item} /></span>
+                <span><span className="mono">{item.sku}</span> · {item.category?.name ?? "Uncategorised"} · <Stock item={item} stores={stores} /></span>
               </span>
               <span className="line-search-price">
                 {formatMoney(item.selling_price, money)}
@@ -220,12 +239,13 @@ function PartSearchSheet({
   onAddCustom,
   categories,
   vehicleSearch,
+  stores = SINGLE_DOCUMENT_STORE,
 }: Props & { open: boolean; onOpenChange: (open: boolean) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [added, setAdded] = useState(0);
-  const { q, items, error, loading } = usePartSearch(open, query, category);
+  const { q, items, error, loading } = usePartSearch(open, query, category, stores.multi ? stores.docStoreId : null);
 
   const close = (next: boolean) => {
     onOpenChange(next);
@@ -298,7 +318,7 @@ function PartSearchSheet({
               <span className="product-thumbnail"><Box size={16} /></span>
               <span className="line-search-info">
                 <strong className="product-title">{item.name}</strong>
-                <span><span className="mono">{item.sku}</span> · <Stock item={item} /></span>
+                <span><span className="mono">{item.sku}</span> · <Stock item={item} stores={stores} /></span>
               </span>
               <span className="line-search-price">
                 {formatMoney(item.selling_price, money)}

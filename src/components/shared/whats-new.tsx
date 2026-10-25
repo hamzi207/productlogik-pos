@@ -6,8 +6,7 @@ import { Gift, X } from "lucide-react";
 import { ModalSheet } from "./modal-sheet";
 import { markWhatsNewSeen } from "@/lib/actions/whats-new";
 import { CHANGELOG, LATEST_CHANGELOG_ID } from "@/lib/changelog";
-
-const DATE = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+import { formatDay } from "@/lib/format";
 
 /** Top-bar "What's new" (RF-16.3): a dot until this user opens the latest entry; opening it clears the dot. */
 export function WhatsNew({ seen }: { seen: string | null }) {
@@ -55,7 +54,7 @@ export function WhatsNew({ seen }: { seen: string | null }) {
               <header>
                 <h3>{entry.title}</h3>
                 {isNew(i) && <span className="whats-new-tag">New</span>}
-                <time dateTime={entry.date}>{DATE.format(new Date(`${entry.date}T00:00:00Z`))}</time>
+                <time dateTime={entry.date}>{formatDay(entry.date)}</time>
               </header>
               <ul>
                 {entry.items.map((item) => <li key={item}>{item}</li>)}

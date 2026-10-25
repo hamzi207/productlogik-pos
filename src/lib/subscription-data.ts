@@ -79,7 +79,7 @@ const n = (v: number | string | null) => (v === null ? null : Number(v));
 export async function getTenantSubscription(tenantId: string): Promise<TenantSubscription | null> {
   await requireSuperadmin();
   const admin = createAdminClient();
-  const [{ data: s, error }, { data: tenant }, invoices, payments, adjustments, history, users, products] = await Promise.all([
+  const [{ data: s, error }, { data: tenant }, invoices, payments, adjustments, history, users, products, stores] = await Promise.all([
     admin.from("tenant_subscriptions").select("*, plan:subscription_plans!tenant_subscriptions_plan_id_fkey(*), pending:subscription_plans!tenant_subscriptions_pending_plan_id_fkey(name)").eq("tenant_id", tenantId).maybeSingle(),
     admin.from("tenants").select("status, status_reason").eq("id", tenantId).maybeSingle(),
     admin.from("subscription_invoices").select("*, subscription_invoice_lines(kind, description, amount, sort_order)").eq("tenant_id", tenantId).order("period_start", { ascending: false }).limit(48),
@@ -88,6 +88,8 @@ export async function getTenantSubscription(tenantId: string): Promise<TenantSub
     admin.from("tenant_subscription_history").select("*").eq("tenant_id", tenantId).order("changed_at", { ascending: false }).limit(50),
     admin.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).is("deactivated_at", null),
     admin.from("inventory_items").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    // Phase 20: open stores count towards the plan's store limit.
+    admin.from("stores").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("is_active", true),
   ]);
   if (error) throw new Error(`tenant_subscriptions: ${error.message}`);
   if (!s || !s.plan) return null;
@@ -123,7 +125,7 @@ export async function getTenantSubscription(tenantId: string): Promise<TenantSub
     overrides: { maxStores: s.max_stores, maxUsers: s.max_users, maxProducts: s.max_products, modules: s.allowed_modules },
     planLimits: { maxStores: s.plan.max_stores, maxUsers: s.plan.max_users, maxProducts: s.plan.max_products, modules: s.plan.allowed_modules },
     // Stores arrive in Phase 20: every organization has one.
-    usage: { users: users.count ?? 0, products: products.count ?? 0, stores: 1 },
+    usage: { users: users.count ?? 0, products: products.count ?? 0, stores: stores.count ?? 1 },
     startedAt: s.started_at,
     trialEndsAt: s.trial_ends_at,
     paidUntil: s.paid_until,

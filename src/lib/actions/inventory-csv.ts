@@ -26,6 +26,7 @@ import { hasModule } from "@/lib/module-data";
 import { getUnits } from "@/lib/uom-data";
 import { createClient } from "@/lib/supabase/server";
 import { planLimitMessage } from "@/lib/plan-limits";
+import { getStoreContext } from "@/lib/store";
 import type { Json } from "@/lib/types/database.types";
 import { inventoryItemSchema, type InventoryItemInput } from "@/lib/validations/inventory.schema";
 
@@ -68,10 +69,23 @@ type Existing = {
   sale_uom_id: string | null;
   item_uom_conversions: { uom_id: string; factor: number; selling_price: number | null; barcode: string | null; sort_order: number }[];
   item_vehicle_compatibility: { vehicle_id: number }[];
+  stock_levels: { store_id: string; on_hand: number }[];
 };
 
+/**
+ * Phase 20: the Stock column is the current store's stock (the organization total with one store);
+ * imports set it there and leave other stores as they are.
+ */
+async function csvStore(): Promise<string | null> {
+  const ctx = await getStoreContext();
+  return ctx.multi ? ctx.current.id : null;
+}
+
+const stockOf = (row: Pick<Existing, "quantity_on_hand" | "stock_levels">, storeId: string | null) =>
+  storeId ? Number(row.stock_levels.find((l) => l.store_id === storeId)?.on_hand ?? 0) : Number(row.quantity_on_hand);
+
 const ITEM_COLUMNS =
-  "id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, is_universal, price_includes_tax, attributes, base_uom_id, purchase_uom_id, sale_uom_id, item_uom_conversions(uom_id, factor, selling_price, barcode, sort_order)";
+  "id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, is_universal, price_includes_tax, attributes, base_uom_id, purchase_uom_id, sale_uom_id, item_uom_conversions(uom_id, factor, selling_price, barcode, sort_order), stock_levels(store_id, on_hand)";
 
 const chunks = <T,>(list: T[], size: number) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
 
@@ -130,12 +144,13 @@ function attributeCell(a: Attribute, raw: string): { value: AttrValues[string] }
 /** Validates every row against the shop (categories, SKUs, vehicles, attributes) and builds what would be saved. */
 async function prepare(rows: CsvItemRow[], updateExisting: boolean): Promise<Prepared[]> {
   const supabase = await createClient();
-  const [{ tenant }, categories, attributes, fitment, units] = await Promise.all([
+  const [{ tenant }, categories, attributes, fitment, units, storeId] = await Promise.all([
     getShopSession(),
     getCategories(),
     getAttributes(),
     hasModule("vehicle_fitment"),
     getUnits(),
+    csvStore(),
   ]);
   const index = buildCategoryIndex(categories);
   const unitByCode = new Map(units.map((u) => [u.code.toLowerCase(), u]));
@@ -198,7 +213,7 @@ async function prepare(rows: CsvItemRow[], updateExisting: boolean): Promise<Pre
     };
     const costPrice = num("costPrice", current && update ? Number(current.cost_price) : 0);
     const sellingPrice = num("sellingPrice", current && update ? Number(current.selling_price) : 0, true);
-    const quantityOnHand = num("stock", current && update ? current.quantity_on_hand : 0);
+    const quantityOnHand = num("stock", current && update ? stockOf(current, storeId) : 0);
     const lowStockThreshold = num("lowStock", current && update ? current.low_stock_threshold : 5);
 
     const yesNo = (k: CsvColumnKey, fallback: boolean | null) => {
@@ -365,6 +380,7 @@ export async function importInventoryCsv(rows: CsvItemRow[], updateExisting: boo
     return { status: "error", message: "We couldn't read these rows. Please try again." };
   }
   const supabase = await createClient();
+  const storeId = await csvStore();
   const results: CsvImportResult[] = [];
   for (const p of prepared) {
     const { line, sku } = p.check;
@@ -375,6 +391,7 @@ export async function importInventoryCsv(rows: CsvItemRow[], updateExisting: boo
     const item = p.input;
     const { error } = await supabase.rpc("save_inventory_item", {
       p_item_id: p.existingId,
+      p_store_id: storeId ?? undefined,
       p_sku: item.sku,
       p_name: item.name,
       p_description: item.description || undefined,
@@ -423,7 +440,7 @@ const columnAttributes = (attributes: Attribute[]) => attributes.filter((a) => !
 /** "Export Inventory (CSV)": every item in the shop (all pages), in the import template's columns. */
 export async function exportInventoryCsv(): Promise<{ status: "success"; header: string[]; rows: (string | number)[][] } | { status: "error"; message: string }> {
   const supabase = await createClient();
-  const [categories, attributeDefs, fitment, units] = await Promise.all([getCategories(), getAttributes(), hasModule("vehicle_fitment"), getUnits()]);
+  const [categories, attributeDefs, fitment, units, storeId] = await Promise.all([getCategories(), getAttributes(), hasModule("vehicle_fitment"), getUnits(), csvStore()]);
   const index = buildCategoryIndex(categories);
   const attrs = columnAttributes(attributeDefs);
   const codeOf = new Map(units.map((u) => [u.id, u.code]));
@@ -458,7 +475,7 @@ export async function exportInventoryCsv(): Promise<{ status: "success"; header:
         category: node ? fullPath(node) : "",
         costPrice: Number(i.cost_price),
         sellingPrice: Number(i.selling_price),
-        stock: Number(i.quantity_on_hand),
+        stock: stockOf(i, storeId),
         universal: yes(i.is_universal),
         vehicles: i.is_universal ? "" : formatVehiclesCell(i.item_vehicle_compatibility.flatMap((l) => (l.vehicles ? [l.vehicles] : []))),
         vendor: i.vendor_name ?? "",

@@ -28,6 +28,10 @@
   3. **Counter sales stay out** (Appendix A). ProductLogik POS is a hosted web app. It can't run locally at the counter, and over the internet it would be too slow for a scan-and-pay checkout queue. Walk-in invoices, barcodes (Phase 23), the quick counter invoice (Phase 26 deliverable 8) and the POS slip cover counter needs.
 - **Rev 8 (2026-10-22, during Phase 18)**: **the superadmin creates every organization; there is no self sign-up.** `/register`, the "Open sign-up" platform switch and the on-signup database trigger are removed. Create Organization provisions the organization through the service-role function `admin_create_organization()`, so a direct call to the public sign-up API can't create one. The other platform settings stay and now apply to new organizations (default plan, its starting status). An industry's active flag now means "open for new organizations" (offered in Create Organization). Open question 5 (§8) is answered by this.
 - **Rev 9 (2026-10-25, during Phase 19)**: the product owner asked for **packs to be switched on in Settings** and for each organization to choose **which units can be packs** (Phase 19, deliverable 6). Purchase orders stay in Phase 25, built in sequence; Phase 25 deliverable 2 now spells out that PO lines are entered in boxes / cartons (starting in the product's buy-in unit) and received into stock in base units.
+- **Rev 10 (2026-10-25, Phase 20 start)**: **RF-20.1 store prices and RF-20.2 per-store numbering are accepted** (Phase 20 deliverables 7 and 8). Until Phase 22 adds the manager role, "managers/admins" in the cross-store invoicing rule means admins.
+- **Rev 11 (2026-10-25, during Phase 20)**: **stores and users are part of the paid subscription.** Only the superadmin changes plans and limits (the organization can only request a change). Organization admins add stores and invite users **up to their subscription's limits** (the plan's, or the organization's own override; the database refuses more) and manage them: store details, codes, who works where, store rules; team roles, deactivating, pending invites. **Deleting a store and switching a store off or back on is console-only**; past a limit, the superadmin raises it on the organization's Subscription tab or adds the store or user from the console. Phase 22's Team updates and Phase 17's console tools follow this rule.
+- **Rev 12 (2026-10-25, during Phase 20)**: **organization users sign in with a username and password, not email** (Phase 22, deliverable 6). Many shop staff don't use email or set their own passwords, so: usernames are unique across ProductLogik; the organization admin sets each user's password and changes it when needed (no invitation emails, no email reset, no forced change); org admins sign in the same way and keep an email only for notifications; their own passwords are reset by ProductLogik. Superadmins keep email + password + 2FA. Until Phase 22, V1's email invitations stay.
+- **Rev 13 (2026-10-26, during Phase 20)**: the product owner asked for **superadmins to change their own password in the console** (Phase 22, deliverable 6). Until then it's changed in the Supabase dashboard.
 
 ---
 
@@ -242,7 +246,7 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
 
 **Deliverables**
 1. **Organization management** (`/admin/tenants`, extends V1):
-   - Create Organization (V1), now with: industry (Phase 18), **subscription plan and billing cycle** (deliverable 9), modules, first store(s) (Phase 20), first admin (invite or temporary password), and optional extra users.
+   - Create Organization (V1), now with: industry (Phase 18), **subscription plan and billing cycle** (deliverable 9), modules, first store(s) (Phase 20), first admin (invite or temporary password), and optional extra users. *(Rev 12: from Phase 22 the first admin gets a username, password and notification email; no invite.)*
    - Edit everything on the organization: the full business profile (V1) and all settings (item 3).
    - Status active / trial / suspended (V1) with a reason shown to the organization's users.
    - **Limits** come from the organization's subscription plan (max users, max stores, max products, allowed modules). The superadmin can **override** any one of them for a single organization (e.g. one extra store for a valued customer) without making a new plan. They're enforced in SQL, and org admins see them read-only. Details in deliverable 9.
@@ -256,10 +260,10 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
        - **Reading it**: a small "Archived 4 months ago" label sits on the row, and a colour legend sits above the list. There's also a sort by "archived longest".
        - **Calculation**: the colour is computed from `archived_at` at render time (in the shop timezone of the superadmin view), so no job is needed. Restoring clears it, and re-archiving starts again at light yellow.
 2. **User management across all organizations** (`/admin/users` and the organization's **Users** tab; extends V1 Phase 13/14):
-   - **Create a user directly in any organization**: name, email, role (Phase 22 roles), stores they can work in (Phase 20), and either an invite email or a temporary password shown once. Bulk create from CSV.
+   - **Create a user directly in any organization**: name, email, role (Phase 22 roles), stores they can work in (Phase 20), and either an invite email or a temporary password shown once. Bulk create from CSV. *(Rev 12: from Phase 22, a username and the password the superadmin sets; email only for admins, for notifications.)*
    - **Edit** name, email (with re-verification), role, stores and default store.
    - **Passwords & access**: reset link (V1), temporary password (V1), **reset approver PIN** (Phase 22), **force sign-out** (revoke all sessions).
-   - **Lifecycle**: deactivate / reactivate (V1 Phase 14), resend / cancel invite, **remove from organization / delete account** (their documents stay, attributed to "former member").
+   - **Lifecycle**: deactivate / reactivate (V1 Phase 14), resend / cancel invite *(until Phase 22, Rev 12)*, **remove from organization / delete account** (their documents stay, attributed to "former member").
    - View last sign-in, recent activity and email log per user.
    - V1 safety rules stay: an organization always keeps an active admin, and a superadmin can't lock themselves out.
    - **Platform team**: grant / revoke superadmin to other platform users. Only superadmins can do it, the last superadmin can't be revoked, and it needs typed confirmation and is audited. Superadmins are listed on an `/admin/team` page.
@@ -593,7 +597,7 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
 
 **Goal**: an organization can run several stores. Every store can **see** every other store's stock, but by default a store can **invoice only its own stock**. An organization can choose to allow invoicing from other stores in Settings.
 
-**Recommended features (offered when this phase starts, §10)**: RF-20.1 Store-level price overrides · RF-20.2 Per-store numbering series.
+**Recommended features (offered when this phase starts, §10)**: RF-20.1 Store-level price overrides · RF-20.2 Per-store numbering series. **Both accepted 2026-10-25** (deliverables 7 and 8).
 
 **Rules**
 - **Viewing**: every member of the organization can see every store's stock levels (on hand, reserved, available).
@@ -625,6 +629,13 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
    - Types: `sale`, `sale_cancel`, `reserve`, `release`, `delivery`, `return`, `adjustment`, `count`, `transfer_out`, `transfer_in`, `purchase_receipt`, `supplier_return`, `opening`, `import`.
    - Written from day one; the UI comes in Phase 24.
 6. **Documents carry a store**: every new quotation, order and invoice gets `store_id` (= current store). Each line gets `source_store_id` (= the document's store unless cross-store invoicing is allowed and used). V1 documents are backfilled to Main Store.
+7. **RF-20.1 Store prices** (accepted 2026-10-25): a store can sell a product at its own price (`store_item_prices (store_id, item_id, selling_price)`).
+   - Set in the product dialog (**Store prices**, admins) and shown on the item details store table; Settings → Stores shows how many products each store prices differently.
+   - It replaces the product's own price in that store: new document lines start at it, packs without their own price are store price × pack size, and packs with their own price keep it.
+   - The price comes from the **document's** store (not a line's source store). `save_quote` applies it in SQL, so the line search and the saved document always agree.
+8. **RF-20.2 Per-store numbering** (accepted 2026-10-25): Settings → Stores → **"Number documents per store"** (off by default, admin only).
+   - On: each store has its own drafts / quotations / invoices series, prefixed by its code: `LHR1-INV-1001`. Every active store needs a code before it can be switched on, and new stores need one while it's on. Codes are unique in the organization.
+   - Each store's series continues from that store's highest number so far (or the organization's start number); off again, the shared series continues from the organization's highest number. Numbers already issued never change.
 
 **Migration outline** — `…_phase19_stores.sql`:
 - `stores`, `profile_stores`, `profiles.default_store_id`.
@@ -655,6 +666,8 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
   - A sales user is refused, in SQL as well as in the UI.
 - V1 stock numbers are unchanged after the backfill (per-item sum check in SQL). A single-store organization looks the same as V1.
 - Concurrency: two parallel invoices for the last unit → one is refused.
+- RF-20.1: a product priced Rs 1,200 with a Store B price of Rs 1,350 starts at 1,350 on a Store B invoice and 1,200 on a Store A one; a box of 12 without its own price is 12 × 1,350 at B.
+- RF-20.2: with per-store numbering on, A's next invoice is `A1-INV-…` and B's `B1-INV-…`, each counting on its own; switching it on is refused while an active store has no code.
 
 ---
 
@@ -700,7 +713,7 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
 **Recommended features (offered when this phase starts, §10)**: RF-22.1 Organization activity log · RF-22.2 Two-factor sign-in for organization users · RF-22.3 Sign-in hours per role.
 
 **Deliverables**
-1. **Roles**: `sales`, `storekeeper`, `accountant`, `manager`, `admin` (platform `is_superadmin` is unchanged). V1 `staff` → `sales`, `admin` → `admin`. The Team page role select and invites (role + stores) are updated.
+1. **Roles**: `sales`, `storekeeper`, `accountant`, `manager`, `admin` (platform `is_superadmin` is unchanged). V1 `staff` → `sales`, `admin` → `admin`. The Team page role select and the Add User form (role + stores, deliverable 6) are updated.
 2. **Permission matrix**. These are the defaults, shown read-only in Settings → Team → "What each role can do"; per-organization tweaks are allowed later.
 
 | Permission | Sales | Storekeeper | Accountant | Manager | Admin |
@@ -730,6 +743,16 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
    - The approval is bound to the action, amount and document. It's single-use and expires after 24h (requests) or 60s (approve now). Each one is recorded in `approval_logs`.
 4. **PIN for approvers** (4–6 digits, bcrypt, never returned; 5 wrong tries → 5-minute lock). This is used only for approvals, not for screen lock.
 5. **Server-side enforcement**: every guarded RPC checks `private.has_permission()` or a valid approval. Hiding buttons in the UI is never relied on.
+6. **Username sign-in, passwords set by the admin** (Rev 12). Organization users don't need email:
+   - **Sign in** with **username + password** (the shop sign-in page asks for "Username"). Usernames are unique across ProductLogik, case-insensitive, 3–30 characters of letters, digits, `.` and `_` (e.g. `ali.airpress`); a taken one is refused with "That username is taken".
+   - **Settings → Team → Add User** (replaces Invite Team Member): name, username, role, stores (Phase 20), password, typed twice. The user can sign in at once; nothing is emailed. Adding still counts against the subscription's user limit (Rev 11).
+   - **Passwords are the admin's job**: the org admin sets a user's password and changes it from Team → **Set Password** whenever asked. It's saved hashed and never shown again (forgotten → set a new one). Users aren't asked to change it at sign-in. Setting a password signs that user out of their other sessions.
+   - **Org admins** also sign in with a username. Their **email is required but used only for notifications** (subscription reminders, alerts, copies of statements); it is never a sign-in name. ProductLogik (console → Users → Set Password) resets an org admin's password; the console can set any organization user's password and username too (audited).
+   - **No email recovery** for organization users: the sign-in page's "Forgot password?" says "Ask your organization's admin to set a new password" (admins: "Contact ProductLogik"). Resend / cancel invite, the invitation email and the `/reset-password` flow are removed for them.
+   - **Superadmins are unchanged**: email + password + 2FA on the console sign-in.
+   - **Superadmins change their own password** (Rev 13): the console's account menu → **Change Password** asks for the current password and the new one typed twice (same strength rules as `/reset-password`). It needs the `aal2` session like every console action; a wrong current password is refused. Saving signs the superadmin out of their other sessions (this one stays), keeps their 2FA factor, writes an audit row (`superadmin.password_changed`, no password in it) and emails them a "your password was changed" notice.
+   - **Existing users** (migration): each gets a username from the part of their email before `@` (made unique with a number, e.g. `hamza2`), shown on Team, which the admin can change; their current passwords keep working. Admins keep their email as the notification address; staff emails are kept but no longer shown or used. Pending invitations become users without a password, marked "No password yet" until the admin sets one (that counts as activating them, within the user limit).
+   - **How it works with Supabase Auth** (which needs an email): each organization user's auth email becomes an internal address (`<user id>@users.productlogik.internal`, never emailed). Sign-in looks the username up server-side (service role, rate-limited, the same "Wrong username or password" for any failure) and signs in with that address; the notification email lives on `profiles.email`.
 
 **Migration outline** — `…_phase21_roles_approvals.sql`:
 - `profiles.role` check `('sales','storekeeper','accountant','manager','admin')` + data migration.
@@ -739,16 +762,21 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
 - RPCs `set_my_pin`, `request_approval`, `decide_approval`, `approve_now(p_action, p_context, p_approver, p_pin)`, `private.consume_approval(...)`.
 - `tenants.discount_limit_pct`, `stock_adjust_approval_value`.
 - `private.has_permission(text)`; every V1 admin-only policy reviewed against the new roles.
+- Rev 12: `profiles.username` (citext, unique, format check; not updatable by members except through the admin RPC), backfilled from emails; `private.username_auth_email(username)` (service role only) for sign-in; existing organization users' `auth.users.email` moved to the internal address (superadmins untouched); `profiles.email` required for admins, optional for others.
 
 **Affected files**:
 - **New**: `src/lib/permissions.ts` (the same matrix in TS, for hiding UI), `src/lib/actions/approvals.ts`, `src/components/shared/approval-dialog.tsx`, `pin-pad.tsx`, `src/app/(dashboard)/approvals/page.tsx` (manager inbox).
 - **Changed**: `src/lib/auth.ts` (`role`, `can()`); the team manager, its actions and schema; every newly permission-gated server action (inventory, settings, documents cancel/delete, payments); the notification bell.
+- **Changed (Rev 12)**: the shop sign-in page and `src/lib/actions/auth.ts` (username); `team-manager.tsx` / `team.ts` (Add User, Set Password, no invite emails); the console's Users tab, Create Organization's first admin and bulk CSV (username + password); the forgot / reset-password pages (organization users sent to their admin); the `staff_invite` email template retired.
+- **Changed (Rev 13)**: the console's account menu (Change Password dialog), a `changeMyPassword` superadmin action, and a "password changed" email template.
 
 **Checkpoint**:
 - SQL tests per role for every guarded RPC: allowed, refused, allowed with an approval, approval reused (refused), approval for a different amount (refused), expired (refused).
 - PIN lockout after 5 wrong tries.
 - Approval request → notification → approve → the requester's action completes.
 - A deactivated manager can't approve.
+- Rev 12: an admin adds "ali.airpress" with a password, and Ali signs in with it at once; a taken username (any case) is refused; Set Password makes the old one fail and signs Ali out elsewhere; a wrong username and a wrong password give the same message; nothing is emailed; existing users sign in with their new usernames and old passwords; superadmins still sign in by email + 2FA.
+- Rev 13: a superadmin changes their password in the console; a wrong current password is refused; the old password then fails, other sessions are signed out, 2FA still asks for the code, and an audit row and notice email are written.
 
 ---
 
@@ -1374,8 +1402,8 @@ Ideas are drawn from what comparable inventory/invoicing products offer: custome
 | RF-18.4 | Later | Additional industry catalogs per organization | An organization keeps one primary industry (defaults, modules, onboarding checklist) and the superadmin can link more industry catalogs to it, e.g. a mobile shop that also sells computer items sees the Computers & IT tree and its attributes too. Needs a link table, a change to the `categories` / `category_attributes` read policies, and the picker showing which catalog a category comes from (both trees have *Others*, power and security categories). Until then: organization-specific categories and category requests. Raised by the product owner during Phase 18. | Deferred (2026-10-22): a later item, not in Phase 18; built when the product owner names it |
 | RF-19.1 | 19 | Separate purchase and sale units | Buy in cartons, sell in pieces: each item has a default purchase unit used on POs/GRNs and a default sale unit used on invoices, converted automatically. | Accepted (Phase 19, 2026-10-25) |
 | RF-19.2 | 19 | Customer groups & tags | Group or tag customers (e.g. "Lahore dealers", "Monthly billing") to filter lists, statements, price lists and reports. | Accepted (Phase 19, 2026-10-25) |
-| RF-20.1 | 20 | Store-level price overrides | A store can sell an item at a different price from the organization's price (e.g. a mall branch). | Not asked yet |
-| RF-20.2 | 20 | Per-store numbering series | Each store numbers its own documents (e.g. `LHR1-INV-1001`). | Not asked yet |
+| RF-20.1 | 20 | Store-level price overrides | A store can sell an item at a different price from the organization's price (e.g. a mall branch). | Accepted (Phase 20, 2026-10-25) |
+| RF-20.2 | 20 | Per-store numbering series | Each store numbers its own documents (e.g. `LHR1-INV-1001`). | Accepted (Phase 20, 2026-10-25) |
 | RF-21.1 | 21 | Product bundles / kits | Sell a kit (e.g. "Starter Pack") as one line that deducts its component items from stock (bill of materials). | Not asked yet |
 | RF-21.2 | 21 | Product image gallery | Several images per product, shown in search and on the A4 quotation/invoice and share page (optional per document type). | Not asked yet |
 | RF-22.1 | 22 | Organization activity log | Org admins see who changed prices, stock, settings or documents in their organization, and when (their own audit trail). | Not asked yet |

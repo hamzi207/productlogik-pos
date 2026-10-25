@@ -495,13 +495,14 @@
   .modal-footer { height: 64px; border-top: 1px solid var(--slate-200); background: var(--slate-50); padding: 0 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
   .customer-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 14px; }
   .customer-stats > div { height: 72px; padding: 13px 15px; display: flex; align-items: center; gap: 11px; background: var(--white); border: 1px solid var(--slate-200); border-radius: 9px; }
-  .customer-stat-icon { width: 37px; height: 37px; display: grid; place-items: center; border-radius: 8px; }
+  .customer-stat-icon { width: 37px; height: 37px; flex: none; display: grid; place-items: center; border-radius: 8px; }
   .customer-stat-icon.blue { background: var(--accent-brand-soft); color: var(--accent-brand-text); }
   .customer-stat-icon.green { background: var(--green-soft); color: var(--green); }
   .customer-stat-icon.amber { background: var(--amber-soft); color: var(--amber); }
-  .customer-stats strong, .customer-stats span { display: block; }
-  .customer-stats strong { font-size: 16px; color: var(--slate-900); }
-  .customer-stats span { font-size: 9px; color: var(--slate-500); margin-top: 3px; }
+  /* The number and label beside the icon (the icon is a span too, so these stay inside the text block). */
+  .customer-stats > div > div strong, .customer-stats > div > div span { display: block; }
+  .customer-stats > div > div strong { font-size: 16px; color: var(--slate-900); }
+  .customer-stats > div > div span { font-size: 9px; color: var(--slate-500); margin-top: 3px; }
   .customer-filters { height: 65px; display: flex; align-items: center; gap: 12px; padding: 11px; border-bottom: 1px solid var(--slate-200); }
   .customer-filters .inventory-search { max-width: 360px; }
   .customer-table td { height: 70px; cursor: pointer; }
@@ -652,6 +653,9 @@
   .timezone-select:focus { border-color: var(--accent-brand); box-shadow: 0 0 0 3px var(--ring-soft); }
   .timezone-select[aria-invalid="true"] { border-color: var(--red); }
   fieldset:disabled .timezone-select { cursor: not-allowed; opacity: .6; }
+  .store-roles-select { width: 220px; max-width: 100%; outline: 0; flex: none; }
+  .store-roles-select:focus { border-color: var(--accent-brand); box-shadow: 0 0 0 3px var(--ring-soft); }
+  .store-roles-select:disabled, .admin-role-select:disabled { cursor: not-allowed; opacity: .6; }
   .segmented { display: inline-flex; padding: 3px; gap: 3px; background: var(--slate-100); border-radius: 8px; }
   .segmented button { border: 0; border-radius: 6px; padding: 6px 16px; background: transparent; color: var(--slate-600); font-size: 12px; font-weight: 600; }
   .segmented button.active { background: var(--white); color: var(--slate-900); box-shadow: var(--shadow-sm); }
@@ -791,6 +795,17 @@
   .field-select, .field-input { width: 100%; height: 38px; border: 1px solid var(--slate-200); border-radius: 7px; padding: 0 10px; background: var(--white); color: var(--slate-800); font-size: 11px; outline: 0; min-width: 0; }
   .field-select:focus, .field-input:focus { border-color: var(--accent-brand); box-shadow: 0 0 0 3px var(--ring-soft); }
   .field-select:disabled, .field-input:read-only { background: var(--slate-50); color: var(--slate-500); }
+  /* DateInput: reads "9 Nov 2026" in any browser language; the browser's date input sits invisibly on top. */
+  .date-input { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; height: 38px; border: 1px solid var(--slate-200); border-radius: 7px; padding: 0 10px; background: var(--white); color: var(--slate-700); font-size: 11px; font-weight: 400; letter-spacing: normal; margin: 0; cursor: pointer; }
+  .date-input.field-input:read-only { background: var(--white); color: var(--slate-800); }
+  .form-grid label > .date-input { display: flex; color: var(--slate-700); font-size: 10px; font-weight: 400; letter-spacing: normal; margin-bottom: 0; }
+  .date-input-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .date-input-empty { color: var(--slate-400); }
+  .date-input > svg { flex: none; color: var(--slate-400); }
+  .date-input > input[type="date"] { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; }
+  .date-input:focus-within { border-color: var(--accent-brand); box-shadow: 0 0 0 3px var(--ring-soft); }
+  fieldset:disabled .date-input { cursor: not-allowed; opacity: .6; }
+  fieldset:disabled .date-input > input { cursor: not-allowed; }
   .field-select-wrap { display: flex; align-items: center; gap: 4px; }
   .field-label .animate-spin { display: inline-block; margin-left: 5px; vertical-align: -1px; }
   .vehicle-notes { margin-top: 12px; }
@@ -818,6 +833,7 @@
   .customer-picked strong { display: block; color: var(--slate-900); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .customer-picked span { display: flex; align-items: center; gap: 6px; color: var(--slate-500); font-size: 9px; margin-top: 2px; }
   .customer-picked .badge { min-height: 16px; padding: 2px 6px; font-size: 8px; }
+  .customer-picked .customer-change { flex: none; min-height: 28px; padding: 0 10px; gap: 5px; font-size: 11px; background: var(--white); }
 
   .toggle-label { cursor: pointer; }
   .toggle-label.disabled { opacity: .5; cursor: not-allowed; }
@@ -1945,7 +1961,7 @@
   .plan-modules .check-field p { margin: 2px 0 0; color: var(--slate-500); font-size: 10px; }
   .plan-limits span { display: block; font-size: 11px; color: var(--slate-600); line-height: 1.6; }
   .plan-table td:last-child { white-space: nowrap; }
-  .sub-summary { display: grid; grid-template-columns: 1.3fr 1fr; gap: 18px; padding: 0 18px 18px; }
+  .sub-summary { display: grid; grid-template-columns: 1.3fr 1fr; align-items: start; gap: 18px; padding: 16px 18px 18px; }
   .sub-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px 16px; margin: 0; }
   .sub-facts dt { color: var(--slate-500); font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
   .sub-facts dd { margin: 3px 0 0; color: var(--slate-800); font-size: 13px; font-weight: 600; }
@@ -2033,12 +2049,16 @@
   /* ---- Phase 14: Settings tabs, numbering, wallets, team; bank card on the share page ---- */
   .settings-tabs { display: flex; gap: 4px; margin: -4px 0 14px; padding: 4px; border-radius: 10px; background: var(--white); border: 1px solid var(--slate-200); overflow-x: auto; scrollbar-width: none; }
   .settings-tabs::-webkit-scrollbar { display: none; }
-  /* Wider than a phone: wrap instead of hiding the last tabs off the edge (phones keep the sideways scroll). */
-  @media (min-width: 769px) { .settings-tabs { flex-wrap: wrap; overflow: visible; } }
-  .settings-tabs a { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 7px; color: var(--slate-600); font-size: 12px; font-weight: 600; white-space: nowrap; text-decoration: none; }
+  .settings-tabs a { display: inline-flex; flex: none; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 7px; color: var(--slate-600); font-size: 12px; font-weight: 600; white-space: nowrap; text-decoration: none; }
   .settings-tabs a:hover { background: var(--slate-50); color: var(--slate-900); }
   .settings-tabs a.active { background: var(--slate-900); color: var(--white); }
   .settings-tabs a.active svg { color: var(--accent-brand-text); }
+  /* Always one row (useTabBar): tighter tabs (fit 1), no icons (2), short labels (3); past that the bar scrolls sideways. */
+  .settings-tabs:is([data-fit="1"], [data-fit="2"]) a { padding: 0 9px; gap: 5px; }
+  .settings-tabs[data-fit="3"] a { padding: 0 8px; gap: 5px; }
+  .settings-tabs:is([data-fit="2"], [data-fit="3"]) a svg { display: none; }
+  .settings-tabs .tab-short, .settings-tabs[data-fit="3"] .tab-long { display: none; }
+  .settings-tabs[data-fit="3"] .tab-short { display: inline; }
 
   .numbering-grid { display: grid; padding: 6px 0 4px; }
   .numbering-row { display: grid; grid-template-columns: minmax(120px, 1.2fr) 110px 120px minmax(120px, 1fr); gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--slate-100); }
@@ -2056,9 +2076,10 @@
   .wallet-list .settings-input { max-width: none; width: 100%; }
   .wallet-list .field-error { grid-column: 1 / -1; }
 
+  /* Team and Stores cards: the text takes the room, so the card's action button sits at the far right. */
   .team-head { align-items: center; }
   .team-head > div { flex: 1; }
-  .team-alert { margin: 4px 0 10px; }
+  .team-alert, .settings-card-alert { margin: 4px 0 10px; }
   .team-list { list-style: none; margin: 0; padding: 0; }
   .team-row { display: grid; grid-template-columns: 36px minmax(0, 1.6fr) minmax(0, 1fr) 96px 36px; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--slate-100); }
   .team-row:last-child { border-bottom: 0; }
@@ -2090,7 +2111,7 @@
   @media (max-width: 640px) {
     .plan-modules { grid-template-columns: 1fr; }
     .subscription-banner { margin: 10px 16px 0; flex-wrap: wrap; }
-    .sub-summary { grid-template-columns: 1fr; padding: 0 14px 14px; }
+    .sub-summary { grid-template-columns: 1fr; padding: 14px; }
     .numbering-headrow { display: none; }
     .numbering-row { grid-template-columns: 1fr 1fr; row-gap: 6px; }
     .numbering-name, .numbering-next { grid-column: 1 / -1; }
@@ -2193,6 +2214,7 @@
   .crm-inline-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
   .crm-inline-form input { flex: 1 1 120px; min-width: 0; height: 34px; border: 1px solid var(--slate-200); border-radius: 8px; padding: 0 10px; background: var(--white); color: var(--slate-900); font: inherit; font-size: 12px; }
   .crm-inline-form input[type="date"] { flex: 0 0 auto; }
+  .crm-inline-form .date-input { flex: 0 0 150px; width: auto; height: 34px; border-radius: 8px; color: var(--slate-900); font-size: 12px; }
   .crm-list { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
   .crm-list li { display: grid; grid-template-columns: 30px 1fr; gap: 6px; align-items: start; padding: 8px; border-radius: 8px; background: var(--slate-50); font-size: 12px; }
   .crm-list li > span { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
@@ -2357,13 +2379,12 @@
 
   /* Console organization page and shop Settings: full width, every tab visible, settings rows as label | control. */
   .settings-page.shop-settings { max-width: none; }
-  .tenant-page .settings-tabs { flex-wrap: wrap; overflow: visible; }
   /* Forms stop at 1,100 px so labels and controls stay close on wide screens. */
   :is(.tenant-page, .shop-settings) :is(.settings-form, form.settings-card) { max-width: 1100px; }
   :is(.tenant-page, .shop-settings) .settings-row { display: grid; grid-template-columns: minmax(200px, 320px) minmax(0, 1fr); justify-content: stretch; gap: 24px; }
   :is(.tenant-page, .shop-settings) .settings-row > :last-child:not(.settings-label) { justify-self: start; }
   :is(.tenant-page, .shop-settings) .settings-input { max-width: 520px; width: 100%; }
-  .tenant-page > .settings-card + .settings-card, .tenant-page > section + section { margin-top: 16px; }
+  :is(.tenant-page, .shop-settings) > .settings-card + .settings-card, :is(.tenant-page, .shop-settings) > section + section { margin-top: 16px; }
   .tenant-stats { margin-bottom: 16px; }
   .stat-link { display: block; color: inherit; text-decoration: none; border-radius: 12px; }
   .stat-link .stat-card { height: 100%; transition: border-color .15s, box-shadow .15s; }
@@ -2496,5 +2517,152 @@
     .report-filters { justify-content: stretch; }
     .report-filters > * { flex: 1 1 100%; }
     .line-unit-select { height: 36px; font-size: 13px; }
+  }
+
+  /* ---- Phase 20: stores ---- */
+  /* Top bar: the current store (a chip with one work store, else a menu) */
+  .store-switcher { display: inline-flex; align-items: center; gap: 7px; height: 36px; max-width: 220px; border: 1px solid var(--slate-200); border-radius: 8px; padding: 0 10px; background: var(--white); color: var(--slate-700); font-size: 11px; font-weight: 600; }
+  button.store-switcher:hover { background: var(--slate-50); color: var(--slate-900); }
+  .store-switcher-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .store-switcher-caret { color: var(--slate-400); flex: none; }
+  .store-switcher.is-static { background: var(--slate-50); cursor: default; }
+  /* Settings → Stores */
+  .settings-subhead { margin-top: 10px; }
+  tr.is-retired td { color: var(--slate-400); }
+  .store-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .check-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; border: 1px solid var(--slate-200); border-radius: 6px; padding: 0 9px; font-size: 10px; color: var(--slate-700); cursor: pointer; }
+  .check-chip:has(input:checked) { border-color: var(--info-border); background: var(--info-soft); color: var(--slate-900); }
+  /* Inventory: "Other stores: 15" and the stock-by-store table (popover and product details) */
+  .store-stock-trigger { display: inline-flex; align-items: center; gap: 4px; margin-top: 3px; border: 0; padding: 0; background: none; color: var(--info-dark); font-size: 9px; font-weight: 600; cursor: pointer; }
+  .store-stock-trigger:hover { text-decoration: underline; }
+  .store-stock-panel { z-index: 60; min-width: 300px; max-width: calc(100vw - 24px); background: var(--white); border: 1px solid var(--slate-200); border-radius: 10px; box-shadow: 0 16px 40px rgba(15,23,42,.14); padding: 8px; }
+  .store-stock-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .store-stock-table th { text-align: left; color: var(--slate-400); font-size: 9px; font-weight: 600; letter-spacing: .04em; padding: 6px 8px; border-bottom: 1px solid var(--slate-100); }
+  .store-stock-table td { padding: 7px 8px; border-bottom: 1px solid var(--slate-100); color: var(--slate-700); }
+  .store-stock-table tr:last-child td { border-bottom: 0; }
+  .store-stock-table td .badge { margin-left: 6px; }
+  .store-stock-table tr.is-current td { background: var(--slate-50); }
+  .product-details-stores { margin-top: 16px; }
+  .product-details-stores h3 { margin: 0 0 6px; font-size: 12px; color: var(--slate-800); }
+  /* Product dialog: store prices and low-stock levels */
+  .store-prices-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 8px 10px; align-items: center; }
+  .store-prices-head { color: var(--slate-400); font-size: 9px; font-weight: 600; letter-spacing: .04em; }
+  .store-prices-row { display: contents; }
+  .store-prices-row > strong { font-size: 11px; color: var(--slate-800); }
+  .store-prices-row input { height: 36px; border: 1px solid var(--slate-200); border-radius: 8px; padding: 0 10px; background: var(--white); color: var(--slate-900); font-size: 12px; min-width: 0; }
+  .store-prices-row .field-error { grid-column: 1 / -1; }
+  /* Document lines: where the stock comes from, and other stores' stock */
+  .line-source-select { width: 100%; max-width: 220px; height: 24px; margin-top: 3px; border: 1px solid var(--slate-200); border-radius: 6px; padding: 0 4px; background: var(--white); color: var(--slate-700); font-size: 10px; }
+  .line-source { color: var(--info-dark); }
+  .stock-elsewhere { color: var(--slate-500); font-weight: 500; }
+  /* Lists, dashboard and reports: this store | all stores */
+  .store-scope { display: inline-flex; align-items: center; gap: 2px; height: 36px; padding: 3px; border: 1px solid var(--slate-200); border-radius: 9px; background: var(--slate-50); box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+  .store-scope > svg { flex: none; margin: 0 6px 0 7px; color: var(--accent-brand-text); }
+  .store-scope button { height: 28px; border: 0; border-radius: 6px; padding: 0 12px; background: transparent; color: var(--slate-500); font-size: 12px; font-weight: 600; white-space: nowrap; cursor: pointer; transition: background .15s, color .15s, box-shadow .15s; }
+  .store-scope button:hover { color: var(--slate-900); }
+  .store-scope button.active { background: var(--white); color: var(--slate-900); box-shadow: var(--shadow-sm); }
+  .store-scope button:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--ring-soft); }
+  .store-scope-bar { display: flex; align-items: center; padding: 10px 11px; border-bottom: 1px solid var(--slate-200); background: var(--white); }
+  .store-alert { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  @media (max-width: 640px) {
+    .store-switcher { max-width: 140px; height: 40px; }
+    .store-prices-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .store-prices-head:first-child { display: none; }
+    .store-prices-row > strong { grid-column: 1 / -1; margin-top: 6px; }
+    .store-prices-row input { height: 44px; font-size: 14px; }
+    .line-source-select { height: 36px; font-size: 13px; max-width: none; }
+    .store-stock-panel { min-width: 0; width: calc(100vw - 24px); }
+    .store-scope { height: 44px; max-width: 100%; }
+    .store-scope button { height: 36px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  }
+
+  /*
+   * Dropdowns (owner, 2026-10-25): every <select> in the app looks the same, so none is left with the
+   * browser's bare look (white on white in dark mode). Screens set only size and font; border, colours,
+   * chevron and focus come from here. Browsers with customizable selects (Chrome / Edge 135+) also get
+   * the styled list below (fading in as it opens); others open their own list in the same colours.
+   */
+  select:not([multiple]):not([size]) {
+    appearance: none;
+    min-height: 32px;
+    padding-inline: 10px 32px;
+    border: 1px solid var(--slate-200);
+    border-radius: 8px;
+    background-color: var(--white);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 14px 14px;
+    color: var(--slate-800);
+    font-weight: 500;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+    transition: border-color .15s, box-shadow .15s, background-color .15s;
+  }
+  select:not([multiple]):not([size]):hover:not(:disabled) { border-color: var(--slate-300); }
+  select:not([multiple]):not([size]):focus-visible,
+  select:not([multiple]):not([size]):focus { outline: 0; border-color: var(--accent-brand); box-shadow: 0 0 0 3px var(--ring-soft); }
+  select:not([multiple]):not([size]):disabled { cursor: not-allowed; opacity: .6; background-color: var(--slate-50); }
+  select:not([multiple]):not([size])[aria-invalid="true"] { border-color: var(--red); }
+  select option { background-color: var(--white); color: var(--slate-800); }
+  select option:disabled { color: var(--slate-400); }
+  /* Small selects inside document lines, and selects that sit inside their own bordered box. */
+  select.line-source-select:not([multiple]), select.line-unit-select:not([multiple]) { min-height: 0; padding-inline: 6px 22px; border-radius: 6px; background-position: right 6px center; background-size: 12px 12px; }
+  .tag-filter select:not([multiple]):not([size]) { min-height: 0; padding-inline: 0 24px; border: 0; background-color: transparent; box-shadow: none; background-position: right 4px center; }
+
+  @supports (appearance: base-select) {
+    select:not([multiple]):not([size]),
+    ::picker(select) { appearance: base-select; }
+    select:not([multiple]):not([size]) { display: inline-flex; align-items: center; gap: 8px; padding-inline: 10px; background-image: none; }
+    select:not([multiple]):not([size])::picker-icon {
+      content: "";
+      flex: none;
+      width: 14px;
+      height: 14px;
+      margin-left: auto;
+      background-color: var(--slate-400);
+      mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / contain no-repeat;
+      transition: rotate .2s;
+    }
+    select:not([multiple]):not([size]):open { border-color: var(--accent-brand); box-shadow: 0 0 0 3px var(--ring-soft); }
+    select:not([multiple]):not([size]):open::picker-icon { rotate: 180deg; background-color: var(--accent-brand); }
+    select.line-source-select:not([multiple]), select.line-unit-select:not([multiple]) { padding-inline: 6px; gap: 4px; }
+    .tag-filter select:not([multiple]):not([size]) { padding-inline: 0 4px; }
+    ::picker(select) {
+      margin-block: 6px;
+      padding: 5px;
+      border: 1px solid var(--slate-200);
+      border-radius: 12px;
+      background: var(--white);
+      box-shadow: var(--shadow-md);
+      max-height: min(320px, 60vh);
+      overflow-y: auto;
+      opacity: 1;
+      translate: 0 0;
+      transition: opacity .14s ease, translate .14s ease, display .14s allow-discrete, overlay .14s allow-discrete;
+    }
+    @starting-style {
+      ::picker(select) { opacity: 0; translate: 0 -4px; }
+    }
+    select option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 34px;
+      padding: 7px 10px;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--slate-700);
+      font-size: 12px;
+      font-weight: 500;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: background-color .1s, color .1s;
+    }
+    select option:hover, select option:focus-visible { outline: 0; background: var(--slate-100); color: var(--slate-900); }
+    select option:checked { background: var(--accent-brand-soft); color: var(--accent-brand-text); font-weight: 600; }
+    select option::checkmark { order: 1; margin-left: auto; content: "✓"; color: var(--accent-brand); font-weight: 700; }
+    select option:disabled { opacity: .45; cursor: not-allowed; background: transparent; }
   }
 }

@@ -22,19 +22,28 @@ type Props = {
   attributes: Attribute[];
   /** The organization's units of measure (archived ones too). */
   units: Unit[];
+  /** Phase 20: the organization's stores, main first (stock is set per store). */
+  stores: StoreOption[];
 };
+
+type StoreOption = { id: string; name: string; is_main: boolean; is_active: boolean };
+
+const onHandAt = (product: AdminProduct | null, storeId: string) =>
+  product?.stock_levels.find((l) => l.store_id === storeId)?.on_hand ?? 0;
 
 const money = (n: number) => n.toLocaleString("en-PK", { maximumFractionDigits: 2 });
 
-function ProductDialog({ tenantId, product, index, attributes, units, onClose }: { tenantId: string; product: AdminProduct | null; index: CategoryIndex; attributes: Attribute[]; units: Unit[]; onClose: () => void }) {
+function ProductDialog({ tenantId, product, index, attributes, units, stores, onClose }: { tenantId: string; product: AdminProduct | null; index: CategoryIndex; attributes: Attribute[]; units: Unit[]; stores: StoreOption[]; onClose: () => void }) {
   const active = units.filter((u) => !u.is_archived || u.id === product?.base_uom_id);
+  const stockStores = stores.filter((s) => s.is_active || onHandAt(product, s.id) > 0);
+  const [storeId, setStoreId] = useState(stockStores[0]?.id ?? "");
   const [v, setV] = useState({
     name: product?.name ?? "",
     sku: product?.sku ?? "",
     categoryId: product?.category_id ?? "",
     costPrice: String(product?.cost_price ?? ""),
     sellingPrice: String(product?.selling_price ?? ""),
-    quantityOnHand: String(product?.quantity_on_hand ?? "0"),
+    quantityOnHand: String(onHandAt(product, stockStores[0]?.id ?? "")),
     lowStockThreshold: String(product?.low_stock_threshold ?? "0"),
     priceIncludesTax: product?.price_includes_tax ?? true,
     vendorName: product?.vendor_name ?? "",
@@ -69,6 +78,7 @@ function ProductDialog({ tenantId, product, index, attributes, units, onClose }:
           attributes: mergeAttributeValues(product?.attributes, fields, attrs),
         },
         product?.id,
+        storeId,
       );
     });
 
@@ -117,8 +127,25 @@ function ProductDialog({ tenantId, product, index, attributes, units, onClose }:
         <span>SELLING PRICE</span>
         <input inputMode="decimal" value={v.sellingPrice} onChange={(e) => setV({ ...v, sellingPrice: e.target.value })} />
       </label>
+      {stockStores.length > 1 && (
+        <label>
+          <span>STOCK AT</span>
+          <select
+            value={storeId}
+            onChange={(e) => {
+              setStoreId(e.target.value);
+              setV({ ...v, quantityOnHand: String(onHandAt(product, e.target.value)) });
+            }}
+          >
+            {stockStores.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}{s.is_active ? "" : " (switched off)"}</option>
+            ))}
+          </select>
+          <small>Save once per store to change several.</small>
+        </label>
+      )}
       <label>
-        <span>STOCK ON HAND</span>
+        <span>{stockStores.length > 1 ? "STOCK ON HAND THERE" : "STOCK ON HAND"}</span>
         <input inputMode="decimal" value={v.quantityOnHand} onChange={(e) => setV({ ...v, quantityOnHand: e.target.value })} />
       </label>
       <label>
@@ -145,7 +172,7 @@ function ProductDialog({ tenantId, product, index, attributes, units, onClose }:
 }
 
 /** The console's Products tab: one page of an organization's products with add / edit / delete. */
-export function TenantProductManager({ tenantId, rows, total, categories, attributes, units }: Props) {
+export function TenantProductManager({ tenantId, rows, total, categories, attributes, units, stores }: Props) {
   const index = useMemo(() => buildCategoryIndex(categories), [categories]);
   const unitCode = new Map(units.map((u) => [u.id, u.code]));
   const [dialog, setDialog] = useState<{ product: AdminProduct | null } | null>(null);
@@ -196,6 +223,12 @@ export function TenantProductManager({ tenantId, rows, total, categories, attrib
                 const cat = index.byId.get(p.category_id);
                 const low = p.quantity_on_hand <= p.low_stock_threshold;
                 const stock = formatQty(Number(p.quantity_on_hand), unitCode.get(p.base_uom_id));
+                const byStore =
+                  stores.length > 1
+                    ? stores
+                        .map((s) => `${s.name}: ${formatQty(onHandAt(p, s.id), unitCode.get(p.base_uom_id))}`)
+                        .join("\n")
+                    : undefined;
                 return (
                   <tr key={p.id}>
                     <td className="primary-cell">
@@ -205,7 +238,10 @@ export function TenantProductManager({ tenantId, rows, total, categories, attrib
                     <td>{cat ? fullPath(cat) : <span className="admin-muted">Hidden or removed category</span>}</td>
                     <td className="numeric">{money(Number(p.cost_price))}</td>
                     <td className="numeric">{money(Number(p.selling_price))}</td>
-                    <td className="numeric">{low ? <span className="badge badge-red">{stock}</span> : stock}</td>
+                    <td className="numeric" title={byStore}>
+                      {low ? <span className="badge badge-red">{stock}</span> : stock}
+                      {byStore && <span className="admin-muted"> · {stores.length} stores</span>}
+                    </td>
                     <td>
                       <div className="row-actions admin-row-actions">
                         <button type="button" className="icon-button" aria-label={`Edit ${p.name}`} title="Edit" onClick={() => setDialog({ product: p })}>
@@ -223,7 +259,7 @@ export function TenantProductManager({ tenantId, rows, total, categories, attrib
           </table>
         </div>
       )}
-      {dialog && <ProductDialog tenantId={tenantId} product={dialog.product} index={index} attributes={attributes} units={units} onClose={() => setDialog(null)} />}
+      {dialog && <ProductDialog tenantId={tenantId} product={dialog.product} index={index} attributes={attributes} units={units} stores={stores} onClose={() => setDialog(null)} />}
       <ConfirmDialog request={confirm} pending={pending} onOpenChange={(open) => !open && setConfirm(null)} />
     </>
   );

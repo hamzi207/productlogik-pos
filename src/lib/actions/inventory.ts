@@ -7,8 +7,10 @@ import { getAttributes, getCategories } from "@/lib/category-data";
 import { isRangePastEnd, pageRange, type Paged, type Pagination } from "@/lib/pagination";
 import { createClient } from "@/lib/supabase/server";
 import { planLimitMessage } from "@/lib/plan-limits";
+import { getStoreContext } from "@/lib/store";
 import type { Tables } from "@/lib/types/database.types";
 import type { InventoryListItem } from "@/lib/types/inventory";
+import { ITEM_STOCK_EMBED, mapItemStock, type ItemStockRow } from "@/lib/stock";
 import { ITEM_UNITS_EMBED, type BaseUnit, type ItemConversion } from "@/lib/uom";
 import {
   inventoryFiltersSchema,
@@ -26,13 +28,13 @@ export type InventoryActionResult =
 
 const itemIdSchema = z.uuid();
 
-const ITEM_WITH_FITMENT = `*, item_vehicle_compatibility(vehicles(id, year, make, model, trim)), ${ITEM_UNITS_EMBED}`;
+const ITEM_WITH_FITMENT = `*, item_vehicle_compatibility(vehicles(id, year, make, model, trim)), ${ITEM_UNITS_EMBED}, ${ITEM_STOCK_EMBED}`;
 
 type InventoryRow = Tables<"inventory_items"> & {
   item_vehicle_compatibility: { vehicles: InventoryListItem["vehicles"][number] | null }[];
   base_uom: BaseUnit | null;
   item_uom_conversions: ItemConversion[];
-};
+} & ItemStockRow;
 
 export type InventoryPage = Paged<InventoryListItem> & {
   /** Low-stock parts among everything matching the filters (not just this page). */
@@ -43,7 +45,12 @@ export type InventoryPage = Paged<InventoryListItem> & {
  * One page of the shop's parts. Every filter and sort runs in SQL, so the page and
  * the counts agree; available / low stock are generated columns (Phase 9 migration).
  */
-export async function getInventoryItems(filters: InventoryFilters = {}, pagination: Pagination = { page: 1, limit: 25 }): Promise<InventoryPage> {
+export async function getInventoryItems(
+  filters: InventoryFilters = {},
+  pagination: Pagination = { page: 1, limit: 25 },
+  /** Phase 20: the stock filters and low-stock count use this store's stock; null = organization totals. */
+  storeId: string | null = null,
+): Promise<InventoryPage> {
   const { category, search, fitment, stock, sort, attributes } = inventoryFiltersSchema.parse(filters);
   const supabase = await createClient();
 
@@ -67,14 +74,18 @@ export async function getInventoryItems(filters: InventoryFilters = {}, paginati
   // fitment embed, filters and ordering still apply. A builder is single-use, hence
   // a function: the page, the low-stock count and the past-the-end retry each build one.
   const build = (columns: string, head = false, stockFilter = stock) => {
-    let query = search
-      ? supabase.rpc("search_inventory_items", { p_query: search }, { count: "exact", head }).select(columns)
-      : supabase.from("inventory_items").select(columns, { count: "exact", head });
+    let query = storeId
+      ? supabase.rpc("inventory_items_at_store", { p_store_id: storeId, p_stock: stockFilter, p_query: search }, { count: "exact", head }).select(columns)
+      : search
+        ? supabase.rpc("search_inventory_items", { p_query: search }, { count: "exact", head }).select(columns)
+        : supabase.from("inventory_items").select(columns, { count: "exact", head });
     if (categoryIds) query = query.in("category_id", categoryIds);
     if (fitment) query = query.eq("is_universal", fitment === "universal");
-    if (stockFilter === "in") query = query.gt("available_quantity", 0);
-    else if (stockFilter === "out") query = query.lte("available_quantity", 0);
-    else if (stockFilter === "low") query = query.eq("is_low_stock", true);
+    if (!storeId) {
+      if (stockFilter === "in") query = query.gt("available_quantity", 0);
+      else if (stockFilter === "out") query = query.lte("available_quantity", 0);
+      else if (stockFilter === "low") query = query.eq("is_low_stock", true);
+    }
     for (const f of attributeFilters) {
       if (f.type === "select") query = query.eq(`attributes->>${f.key}`, f.value);
       else if (f.value === "yes") query = query.eq(`attributes->${f.key}`, true);
@@ -116,8 +127,9 @@ export async function getInventoryItems(filters: InventoryFilters = {}, paginati
     throw new Error("Could not load inventory.");
   }
 
-  const rows: InventoryListItem[] = (data ?? []).map(({ item_vehicle_compatibility, item_uom_conversions, ...item }) => ({
+  const rows: InventoryListItem[] = (data ?? []).map(({ item_vehicle_compatibility, item_uom_conversions, stock_levels, store_item_prices, ...item }) => ({
     ...item,
+    ...mapItemStock({ stock_levels, store_item_prices }),
     quantity_on_hand: Number(item.quantity_on_hand),
     reserved_quantity: Number(item.reserved_quantity),
     low_stock_threshold: Number(item.low_stock_threshold),
@@ -147,8 +159,16 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
   const item = parsed.data;
 
   const supabase = await createClient();
+  // Phase 20: the stock entered is the current store's.
+  const { current } = await getStoreContext();
   const { data, error } = await supabase.rpc("save_inventory_item", {
     p_item_id: id,
+    p_store_id: current.id,
+    p_store_settings: item.storeSettings?.map((s) => ({
+      store_id: s.storeId,
+      selling_price: s.sellingPrice,
+      low_stock_threshold: s.lowStockThreshold,
+    })),
     p_sku: item.sku,
     p_name: item.name,
     p_description: item.description || undefined,
@@ -184,6 +204,10 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
         }
         return { status: "error", field: "sku", message: `SKU ${item.sku} is already used by another item.` };
       case "23514":
+        // Phase 20: stock at the store can't go below what its open quotations reserved.
+        if (error.message.includes("reserved on quotations") || error.message.includes("Not enough stock")) {
+          return { status: "error", field: "quantityOnHand", message: error.message };
+        }
         if (error.message.includes("inventory_reserved_within_stock")) {
           return {
             status: "error",
@@ -219,6 +243,8 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
       case "P0002":
         return { status: "error", message: "This item no longer exists. It may have been deleted." };
       case "42501":
+        // Store prices (admins only) and stock in a store the member doesn't work in explain themselves.
+        if (/store/i.test(error.message)) return { status: "error", message: error.message };
         return { status: "error", message: "Your session has expired. Please sign in again." };
       default:
         console.error("saveInventoryItem failed:", error);

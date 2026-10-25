@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Dialog } from "radix-ui";
 import { Banknote, Coins, Loader2, X } from "lucide-react";
+import { DateInput } from "@/components/shared/date-input";
 import { ModalSheet } from "@/components/shared/modal-sheet";
 import { recordPayment } from "@/lib/actions/quotes";
 import { PAYMENT_METHODS, type PaymentMethod } from "@/lib/documents";
@@ -242,7 +243,7 @@ function PaymentForm({ invoiceId, number, balance, lines, money, today, onDone }
           </label>
           <label>
             <span>PAID ON</span>
-            <input type="date" value={paidOn} max={today} onChange={(e) => setPaidOn(e.target.value)} />
+            <DateInput value={paidOn} max={today} onChange={(e) => setPaidOn(e.target.value)} />
           </label>
           <label>
             <span>REFERENCE / NOTES (OPTIONAL)</span>

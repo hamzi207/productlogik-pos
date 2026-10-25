@@ -1,13 +1,6 @@
-import { Suspense } from "react";
-import type { Metadata } from "next";
-import { SettingsLoading, ShopSettingsSection } from "@/components/settings/shop-settings-section";
+import { permanentRedirect } from "next/navigation";
 
-export const metadata: Metadata = { title: "Settings · POS" };
-
+/** The POS tab (tax) joined Printing as Tax & Printing; old links land there. */
 export default function SettingsPosPage() {
-  return (
-    <Suspense fallback={<SettingsLoading />}>
-      <ShopSettingsSection sections={["tax"]} label="POS" />
-    </Suspense>
-  );
+  permanentRedirect("/settings/printing");
 }

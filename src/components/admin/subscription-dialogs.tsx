@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AlertTriangle, type LucideIcon } from "lucide-react";
+import { DateInput } from "@/components/shared/date-input";
 import { SubscriptionDialog, useSubmit, type ActionResult } from "@/components/subscription/subscription-dialog";
 import {
   addSubscriptionAdjustment,
@@ -277,7 +278,7 @@ export function StartDateDialog({ sub, icon, onClose }: { sub: TenantSubscriptio
     >
       <label className="span-two">
         <span>STARTS ON</span>
-        <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+        <DateInput value={start} onChange={(e) => setStart(e.target.value)} />
       </label>
       <ReasonField value={reason} onChange={setReason} />
     </SubscriptionDialog>
@@ -309,7 +310,7 @@ export function ExtendDialog({ sub, icon, onClose }: { sub: TenantSubscription; 
     >
       <label className="span-two">
         <span>{trial ? "TRIAL ENDS ON" : "PAY BY"}</span>
-        <input type="date" value={until} min={billingToday()} onChange={(e) => setUntil(e.target.value)} />
+        <DateInput value={until} min={billingToday()} onChange={(e) => setUntil(e.target.value)} />
       </label>
       <ReasonField value={reason} onChange={setReason} />
     </SubscriptionDialog>
@@ -391,7 +392,7 @@ export function RecordPaymentDialog({ invoice, icon, onClose }: { invoice: Subsc
     >
       <label>
         <span>PAID ON</span>
-        <input type="date" value={v.paidOn} max={billingToday()} onChange={(e) => set("paidOn", e.target.value)} />
+        <DateInput value={v.paidOn} max={billingToday()} onChange={(e) => set("paidOn", e.target.value)} />
       </label>
       <label>
         <span>METHOD</span>

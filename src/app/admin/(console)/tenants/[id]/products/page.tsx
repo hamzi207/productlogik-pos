@@ -4,7 +4,7 @@ import { AdminFilters } from "@/components/admin/admin-filters";
 import { TenantProductManager } from "@/components/admin/tenant-product-manager";
 import { SettingsLoading } from "@/components/settings/shop-settings-section";
 import { PaginationBar } from "@/components/ui/pagination-bar";
-import { getTenantCategoryView, getTenantProducts, getTenantUnits } from "@/lib/admin-category-data";
+import { getTenantCategoryView, getTenantProducts, getTenantStoreOptions, getTenantUnits } from "@/lib/admin-category-data";
 import { tenantParam } from "@/lib/admin-params";
 import { buildCategoryIndex, descendantIds, fullPath } from "@/lib/categories";
 import { parsePagination } from "@/lib/pagination";
@@ -17,7 +17,7 @@ const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v
 
 async function Products({ params, searchParams }: { params: Params; searchParams: SearchParams }) {
   const [id, raw] = await Promise.all([tenantParam(params), searchParams]);
-  const [view, units] = await Promise.all([getTenantCategoryView(id), getTenantUnits(id)]);
+  const [view, units, stores] = await Promise.all([getTenantCategoryView(id), getTenantUnits(id), getTenantStoreOptions(id)]);
   const hidden = new Set(view.hiddenIds);
   const visible = view.categories.filter((c) => !hidden.has(c.id));
   const index = buildCategoryIndex(visible);
@@ -41,6 +41,7 @@ async function Products({ params, searchParams }: { params: Params; searchParams
         categories={visible}
         attributes={[...view.industryAttributes, ...view.attributes].filter((a) => !a.is_archived)}
         units={units}
+        stores={stores}
       />
       <PaginationBar total={result.total} page={result.page} limit={result.limit} noun={["product", "products"]} />
     </section>

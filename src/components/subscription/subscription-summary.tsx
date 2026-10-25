@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Banknote, CreditCard, FileText, MessageSquare, Send, Smartphone } from "lucide-react";
+import { DateInput } from "@/components/shared/date-input";
 import { requestPlanChange, submitSubscriptionPayment } from "@/lib/actions/my-subscription";
 import type { MySubscription } from "@/lib/my-subscription-data";
 import {
@@ -49,7 +50,7 @@ function PaidDialog({ invoice, onClose }: { invoice: Invoice; onClose: () => voi
     >
       <label>
         <span>PAID ON</span>
-        <input type="date" value={v.paidOn} max={billingToday()} onChange={(e) => set("paidOn", e.target.value)} />
+        <DateInput value={v.paidOn} max={billingToday()} onChange={(e) => set("paidOn", e.target.value)} />
       </label>
       <label>
         <span>PAID WITH</span>
@@ -280,8 +281,8 @@ export function SubscriptionSummary({ data }: { data: MySubscription }) {
         <div className="sub-summary">
           <dl className="sub-facts">
             {s.status === "trial" && <div><dt>Trial ends</dt><dd>{billingDate(s.trialEndsAt)}</dd></div>}
-            {!free && <div><dt>Paid until</dt><dd>{s.paidUntil ? billingDate(s.paidUntil) : "Nothing paid yet"}</dd></div>}
-            {!free && s.nextDueDate && <div><dt>Next payment due</dt><dd>{billingDate(s.nextDueDate)}</dd></div>}
+            <div><dt>Paid until</dt><dd>{free ? "Nothing to pay" : s.paidUntil ? billingDate(s.paidUntil) : "Nothing paid yet"}</dd></div>
+            <div><dt>Next payment due</dt><dd>{!free && s.nextDueDate ? billingDate(s.nextDueDate) : "Not billed"}</dd></div>
             {s.cancelAt && <div><dt>Ends after</dt><dd>{billingDate(s.cancelAt)}</dd></div>}
           </dl>
           <div className="sub-usage">

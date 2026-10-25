@@ -20,6 +20,7 @@ import {
   LogOut,
   Trash2,
   Undo2,
+  Store,
 } from "lucide-react";
 import {
   convertQuote,
@@ -29,6 +30,7 @@ import {
   setDocumentStatus,
   type QuoteActionResult,
 } from "@/lib/actions/quotes";
+import { DateInput } from "@/components/shared/date-input";
 import {
   addDays,
   isDeletable,
@@ -43,6 +45,8 @@ import { formatDate, formatMoney, type MoneyFormat } from "@/lib/format";
 import { notify } from "@/lib/notify";
 import { formatPhone } from "@/lib/phone";
 import { quoteTotals, type DiscountType } from "@/lib/quote-math";
+import { SINGLE_DOCUMENT_STORE, type DocumentStores } from "@/lib/stock";
+import { setCurrentStore } from "@/lib/actions/stores";
 import type { CustomerOption, CustomerOptionsResponse, PickerItem, QuoteDocument } from "@/lib/types/quote";
 import { quoteSchema, type QuoteInput } from "@/lib/validations/quote.schema";
 import { CustomerDialog } from "@/components/customers/customer-dialog";
@@ -96,6 +100,10 @@ type Props = {
   categories: CategoryChip[];
   /** The product search also matches linked vehicles (Vehicle Fitment module on). */
   vehicleSearch: boolean;
+  /** Phase 20: the document's store (new documents: the current store) and what its lines may do. */
+  stores?: DocumentStores;
+  /** Organization admin: may still change a saved invoice's customer and due date. */
+  isAdmin: boolean;
 };
 
 type Action = {
@@ -117,6 +125,7 @@ const formatDay = (day: string) => formatDate(`${day}T12:00:00Z`, "UTC");
 const autoReason = (pct: number) => `${AUTO_REASON} (${pct}%)`;
 
 function linesFrom(doc: QuoteDocument | null): BuilderLine[] {
+  // Phase 20: a line from the document's own store keeps sourceStoreId null (the default).
   return (doc?.lines ?? []).map((l) => ({
     key: l.id,
     itemId: l.item_id,
@@ -134,6 +143,8 @@ function linesFrom(doc: QuoteDocument | null): BuilderLine[] {
     uomFactor: l.uom_factor,
     uomDecimals: l.item_id ? (l.units.find((u) => u.id === l.uom_id)?.decimals ?? 0) : 3,
     units: l.units,
+    sourceStoreId: l.item_id && l.source_store_id && l.source_store_id !== doc?.store_id ? l.source_store_id : null,
+    storeStock: l.item_id ? l.store_stock : null,
   }));
 }
 
@@ -183,13 +194,30 @@ function BuilderForm({
   walkIn,
   categories,
   vehicleSearch,
+  stores = SINGLE_DOCUMENT_STORE,
+  isAdmin,
   onCreated,
 }: Props & { onCreated: () => void }) {
   const router = useRouter();
   const status = doc?.status ?? null;
-  const editable = doc === null || isEditable(doc.status);
+  // Phase 20: changing a document means working in its store: members of it switch to it first; others
+  // only view it (the database refuses changes from anyone who doesn't work there).
+  const otherStore = doc !== null && stores.multi && (!stores.canWork || !stores.isCurrent);
+  const editable = (doc === null || isEditable(doc.status)) && !otherStore;
+  const [switching, setSwitching] = useState(false);
+  const switchStore = async () => {
+    setSwitching(true);
+    const result = await setCurrentStore(stores.docStoreId);
+    setSwitching(false);
+    if (result.status === "error") notify.error("Store not switched", result.message);
+    else notify.success(`Working in ${result.message}`, "New documents now go to this store too.");
+  };
   const current: DocumentSection = doc ? sectionForStatus(doc.status) : section;
   const isInvoice = current === "invoices";
+  // A saved invoice: anyone may swap its customer (never remove it), but only admins move its due date
+  // (the database refuses others).
+  const savedInvoice = doc !== null && isInvoice;
+  const dueDateEditable = editable && (isAdmin || !savedInvoice);
   const printer = usePrintDocument(printFormat);
 
   const [customer, setCustomer] = useState<CustomerOption | null>(doc?.customer ?? initialCustomer);
@@ -226,7 +254,8 @@ function BuilderForm({
     setCustomer(next);
     // Walk-ins stay open for the buyer's name and phone.
     if (next && !next.is_walk_in) setHeaderOpen(false);
-    if (isInvoice && editable && next) setDueDate(addDays(invoiceDate, next.credit_days));
+    // Staff swapping a saved invoice's customer leave its due date as it was (the admin's to move).
+    if (isInvoice && dueDateEditable && next) setDueDate(addDays(invoiceDate, next.credit_days));
     if (!next?.is_walk_in) {
       setWalkInName("");
       setWalkInPhone("");
@@ -261,6 +290,7 @@ function BuilderForm({
         discountType: l.discountType,
         discountValue: l.discountValue,
         uomId: l.uomId,
+        sourceStoreId: l.itemId ? l.sourceStoreId : null,
       })),
     }),
     [customer, walkInName, walkInPhone, discountType, discountValue, discountReason, notes, isInvoice, dueDate, lines],
@@ -309,6 +339,8 @@ function BuilderForm({
           uomFactor: unit?.factor ?? 1,
           uomDecimals: unit?.decimals ?? 0,
           units: item.units,
+          sourceStoreId: null,
+          storeStock: item.store_stock,
         },
       ];
     });
@@ -334,6 +366,8 @@ function BuilderForm({
         uomFactor: 1,
         uomDecimals: 3,
         units: [],
+        sourceStoreId: null,
+        storeStock: null,
       },
     ]);
 
@@ -747,6 +781,20 @@ function BuilderForm({
       </div>
 
       {error && <div className="form-alert form-alert-error quote-alert" role="alert">{error}</div>}
+      {otherStore && (
+        <div className="form-alert form-alert-info quote-alert store-alert" role="status">
+          {stores.canWork ? (
+            <>
+              <span>This document belongs to {stores.docStoreName}. Switch to that store to change it.</span>
+              <button type="button" className="button" disabled={switching} onClick={() => void switchStore()}>
+                {switching ? <Loader2 size={14} className="animate-spin" /> : <Store size={14} />} Switch to {stores.docStoreName}
+              </button>
+            </>
+          ) : (
+            <span>This document belongs to {stores.docStoreName}. Only members of that store can change it; you can still print and share it.</span>
+          )}
+        </div>
+      )}
       {status === "paid" && (
         <div className="form-alert form-alert-info quote-alert" role="status">
           This invoice is paid, so it can&apos;t be changed. Mark it unpaid to edit, cancel or delete it.
@@ -787,6 +835,7 @@ function BuilderForm({
             allowInternationalPhones={allowInternationalPhones}
             walkIn={walkIn}
             disabled={!editable}
+            required={savedInvoice}
           />
           {customer && !isWalkIn && (
             <div className="doc-bill-to">
@@ -853,9 +902,8 @@ function BuilderForm({
             <div>
               <dt>Due date</dt>
               <dd>
-                {editable ? (
-                  <input
-                    type="date"
+                {dueDateEditable ? (
+                  <DateInput
                     className="field-input doc-date"
                     value={dueDate}
                     min={doc ? undefined : today}
@@ -889,6 +937,7 @@ function BuilderForm({
         readOnly={!editable}
         categories={categories}
         vehicleSearch={vehicleSearch}
+        stores={stores}
       />
 
       {/* ---- Footer: notes / terms (left), totals / payments (right) ---- */}

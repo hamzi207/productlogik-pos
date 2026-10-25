@@ -1,7 +1,7 @@
 "use client";
 
 import { type DashboardMetrics, type Widget } from "@/lib/dashboard";
-import { formatMoney, type MoneyFormat } from "@/lib/format";
+import { formatDayMonth, formatMoney, formatMonth, type MoneyFormat } from "@/lib/format";
 import { BarChart, DonutChart } from "./charts";
 
 type Props = {
@@ -11,16 +11,11 @@ type Props = {
   money: MoneyFormat;
 };
 
-const fmtDay = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
-const fmtMonth = new Intl.DateTimeFormat("en-GB", { month: "short", timeZone: "UTC" });
-const fmtMonthYear = new Intl.DateTimeFormat("en-GB", { month: "short", year: "2-digit", timeZone: "UTC" });
-
-/** "15 Oct", "Oct" (or "Oct 25" when the range spans years), "2026". */
+/** "09 Oct", "Oct" (or "Oct 25" when the range spans years), "2026". */
 function stepLabel(start: string, grain: DashboardMetrics["grain"], spansYears: boolean) {
-  const d = new Date(`${start}T00:00:00Z`);
-  if (grain === "day") return fmtDay.format(d);
-  if (grain === "month") return (spansYears ? fmtMonthYear : fmtMonth).format(d);
-  return String(d.getUTCFullYear());
+  if (grain === "day") return formatDayMonth(start);
+  if (grain === "month") return spansYears ? `${formatMonth(start, false)} ${start.slice(2, 4)}` : formatMonth(start, false);
+  return start.slice(0, 4);
 }
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 

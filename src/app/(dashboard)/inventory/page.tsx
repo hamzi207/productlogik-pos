@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { Plus, Upload } from "lucide-react";
 import { getInventoryItems } from "@/lib/actions/inventory";
 import { getShopSession } from "@/lib/auth";
+import { getStoreView } from "@/lib/store";
 import { getAttributes, getCategories, getCategoryCounts } from "@/lib/category-data";
 import { hasModule } from "@/lib/module-data";
 import { getUnits } from "@/lib/uom-data";
@@ -31,15 +32,17 @@ function attributeParams(raw: Record<string, string | string[] | undefined>) {
 }
 
 async function AddItemAction() {
-  const [{ tenant }, categories, attributes, fitment, units] = await Promise.all([
+  const [{ tenant }, categories, attributes, fitment, units, storeView] = await Promise.all([
     getShopSession(),
     getCategories(),
     getAttributes(),
     hasModule("vehicle_fitment"),
     getUnits(),
+    getStoreView(),
   ]);
   return (
     <AddItemButton
+      storeView={storeView}
       currency={tenant.currency}
       pricesIncludeTax={tenant.pricesIncludeTax}
       categories={categories}
@@ -90,8 +93,10 @@ async function InventoryResults({ searchParams }: { searchParams: SearchParams }
     attributes: attributeParams(raw),
   });
   const pagination = parsePagination({ page: first(raw.page), limit: first(raw.limit) });
+  // Phase 20: with more than one store the list shows the current store's stock.
+  const storeView = await getStoreView();
   const [result, { tenant }, categories, attributes, units] = await Promise.all([
-    getInventoryItems(filters, pagination),
+    getInventoryItems(filters, pagination, storeView.multi ? storeView.currentId : null),
     getShopSession(),
     getCategories(),
     getAttributes(),
@@ -113,6 +118,7 @@ async function InventoryResults({ searchParams }: { searchParams: SearchParams }
       packsEnabled={tenant.packsEnabled}
       fitment={fitment}
       filtered={filtered}
+      storeView={storeView}
     />
   );
 }

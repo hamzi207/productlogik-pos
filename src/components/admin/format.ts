@@ -1,14 +1,12 @@
-import { formatMoney } from "@/lib/format";
+import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
 import { DEFAULT_TIMEZONE } from "@/lib/timezones";
 import { TENANT_STATUS_LABEL, type TenantStatus } from "@/lib/validations/admin.schema";
 
 // Shared by the /admin pages: platform times are shown in Pakistan time, money in whole units.
 
-export const adminDate = (value: string | null) =>
-  value ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeZone: DEFAULT_TIMEZONE }).format(new Date(value)) : "Never";
+export const adminDate = (value: string | null) => (value ? formatDate(value, DEFAULT_TIMEZONE) : "Never");
 
-export const adminDateTime = (value: string) =>
-  new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short", timeZone: DEFAULT_TIMEZONE }).format(new Date(value));
+export const adminDateTime = (value: string) => formatDateTime(value, DEFAULT_TIMEZONE);
 
 export const adminMoney = (amount: number, currency: string) => formatMoney(amount, { currency, showPaisa: false });
 

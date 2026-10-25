@@ -19,6 +19,8 @@ export type ShopSession = {
   dashboardPrefs: DashboardPrefs;
   /** Newest "What's new" entry this user has opened (lib/changelog.ts). */
   whatsNewSeen: string | null;
+  /** Phase 20: the store this member starts in (null while acting as the shop). */
+  defaultStoreId: string | null;
   tenant: {
     id: string;
     name: string;
@@ -136,6 +138,7 @@ export const getShopSession = cache(async (): Promise<ShopSession> => {
       role: "admin",
       dashboardPrefs: parseDashboardPrefs(null),
       whatsNewSeen: null,
+      defaultStoreId: null,
       tenant: mapTenant(tenant),
       impersonating: { tenantName: impersonation.tenantName, expiresAt: impersonation.expiresAt },
     };
@@ -144,7 +147,7 @@ export const getShopSession = cache(async (): Promise<ShopSession> => {
   // RLS limits this to the caller's own profile/tenant.
   const { data: profile } = await supabase
     .from("profiles")
-    .select(`full_name, email, role, dashboard_prefs, whats_new_seen, tenants!profiles_tenant_id_fkey(${TENANT_COLUMNS})`)
+    .select(`full_name, email, role, dashboard_prefs, whats_new_seen, default_store_id, tenants!profiles_tenant_id_fkey(${TENANT_COLUMNS})`)
     .eq("id", userId)
     .single();
 
@@ -172,6 +175,7 @@ export const getShopSession = cache(async (): Promise<ShopSession> => {
     role: profile.role === "admin" ? "admin" : "staff",
     dashboardPrefs: parseDashboardPrefs(profile.dashboard_prefs),
     whatsNewSeen: profile.whats_new_seen,
+    defaultStoreId: profile.default_store_id,
     tenant: mapTenant(tenant),
     impersonating: null,
   };
