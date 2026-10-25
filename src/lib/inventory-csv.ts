@@ -2,6 +2,7 @@
 // Shared by the import dialog (browser) and src/lib/actions/inventory-csv.ts (server).
 // Phase 18: custom attributes are extra "attr:<key>" columns, and the Universal / Vehicles columns
 // only count for organizations with the Vehicle Fitment module.
+// Phase 19: Unit (the base unit's code), Other Units ("box=12; carton=144@15000") and the purchase / sale units.
 import { parseCsv } from "@/lib/csv";
 
 export const CSV_COLUMNS = [
@@ -17,6 +18,10 @@ export const CSV_COLUMNS = [
   { key: "lowStock", label: "Low Stock Alert", aliases: ["lowstock", "lowstockthreshold", "reorderlevel"] },
   { key: "priceIncludesTax", label: "Price Includes Tax", aliases: ["includestax", "inctax"] },
   { key: "description", label: "Description", aliases: ["notes"] },
+  { key: "unit", label: "Unit", aliases: ["uom", "baseunit", "unitofmeasure"] },
+  { key: "conversions", label: "Other Units", aliases: ["units", "packs", "packunits", "conversions"] },
+  { key: "purchaseUnit", label: "Purchase Unit", aliases: ["buyunit", "purchaseuom"] },
+  { key: "saleUnit", label: "Sale Unit", aliases: ["sellunit", "saleuom", "sellingunit"] },
 ] as const;
 
 export type CsvColumnKey = (typeof CSV_COLUMNS)[number]["key"];
@@ -149,6 +154,32 @@ export function formatVehiclesCell(vehicles: { year: number; make: string; model
   return parts.join("; ");
 }
 
+export type UnitsSpec = { code: string; factor: number; price: number | null; text: string };
+
+/** "box=12; carton=144@15000" → one entry per unit (price after @ is optional). Returns the entries it couldn't read too. */
+export function parseUnitsCell(v: string | undefined): { specs: UnitsSpec[]; invalid: string[] } {
+  const specs: UnitsSpec[] = [];
+  const invalid: string[] = [];
+  for (const part of (v ?? "").split(/[;\n|]+/)) {
+    const text = part.trim();
+    if (!text) continue;
+    const m = /^([^=@]+?)\s*=\s*([\d.,]+)\s*(?:@\s*(.+))?$/.exec(text);
+    const factor = m ? parseNumberCell(m[2]) : NaN;
+    const price = m?.[3] !== undefined ? parseNumberCell(m[3]) : null;
+    if (!m || factor === null || Number.isNaN(factor) || factor <= 0 || (price !== null && (Number.isNaN(price) || price < 0))) {
+      invalid.push(text);
+      continue;
+    }
+    specs.push({ code: m[1].trim().toLowerCase(), factor, price, text });
+  }
+  return { specs, invalid };
+}
+
+/** Conversions → "box=12; carton=144@15000" (the price only when the unit has its own). */
+export function formatUnitsCell(conversions: { code: string; factor: number; price: number | null }[]) {
+  return conversions.map((c) => `${c.code}=${c.factor}${c.price === null ? "" : `@${c.price}`}`).join("; ");
+}
+
 /** "Exterior > Wrapping / PPF" → "exterior › wrapping › ppf", for matching category paths. */
 export const normalizeCategoryPath = (path: string) =>
   path
@@ -160,8 +191,8 @@ export const normalizeCategoryPath = (path: string) =>
 /** The fitment template's header and two example rows (V1). */
 const FITMENT_TEMPLATE: string[][] = [
   CSV_COLUMNS.map((c) => c.label),
-  ["PPF-CLR-001", "Clear PPF roll (1.5m x 15m)", "Exterior › Wrapping › PPF", "38000", "52000", "4", "Yes", "", "Lahore Wraps", "2", "Yes", "Self-healing clear film"],
-  ["MAT-ALT-018", "Floor mats (Alto 2019+)", "Interior › Floor Mats", "2500", "4200", "12", "No", "2019-2026 SUZUKI Alto", "", "5", "", ""],
+  ["PPF-CLR-001", "Clear PPF roll (1.5m x 15m)", "Exterior › Wrapping › PPF", "38000", "52000", "4", "Yes", "", "Lahore Wraps", "2", "Yes", "Self-healing clear film", "pcs", "", "", ""],
+  ["MAT-ALT-018", "Floor mats (Alto 2019+)", "Interior › Floor Mats", "2500", "4200", "12", "No", "2019-2026 SUZUKI Alto", "", "5", "", "", "set", "", "", ""],
 ];
 
 /**
@@ -174,6 +205,6 @@ export function templateRows(fitment: boolean, attributeKeys: string[], exampleC
   if (fitment) return [[...FITMENT_TEMPLATE[0], ...attrHeader], ...FITMENT_TEMPLATE.slice(1).map((r) => [...r, ...blanks])];
   return [
     [...csvColumns(false).map((c) => c.label), ...attrHeader],
-    ["ITM-001", "Example product", exampleCategory || "Main category › Subcategory", "100", "150", "10", "Your supplier", "5", "Yes", "Notes for your team", ...blanks],
+    ["ITM-001", "Example product", exampleCategory || "Main category › Subcategory", "100", "150", "120", "Your supplier", "24", "Yes", "Notes for your team", "pcs", "box=12@1700", "box", "pcs", ...blanks],
   ];
 }

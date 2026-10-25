@@ -8,20 +8,24 @@ import { formatMoney, type MoneyFormat } from "@/lib/format";
 import { formatPhone, whatsappLink } from "@/lib/phone";
 import type { Paged } from "@/lib/pagination";
 import type { CustomerListItem } from "@/lib/types/customer";
+import type { CustomerTag } from "@/lib/customer-lists";
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import { CustomerAvatar, CustomerTypeBadge } from "./customer-badges";
 import { CustomerDialog } from "./customer-dialog";
+import { TagChips } from "./customer-tags";
 
 type Props = {
   /** One page of the directory + the total matching the filters. */
   result: Paged<CustomerListItem>;
   money: MoneyFormat;
   allowInternationalPhones: boolean;
-  /** True when a search or type filter is active (changes the empty state). */
+  /** The organization's customer tags (RF-19.2), for the chips. */
+  tags: CustomerTag[];
+  /** True when a search, type or tag filter is active (changes the empty state). */
   filtered: boolean;
 };
 
-export function CustomerTable({ result, money, allowInternationalPhones, filtered }: Props) {
+export function CustomerTable({ result, money, allowInternationalPhones, tags, filtered }: Props) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const customers = result.rows;
@@ -33,12 +37,12 @@ export function CustomerTable({ result, money, allowInternationalPhones, filtere
         {filtered ? (
           <>
             <strong>No customers match these filters</strong>
-            Try a different search or customer type.
+            Try a different search, customer type or tag.
           </>
         ) : (
           <>
             <strong>No customers yet</strong>
-            Register your first dealership, fleet account or retail client.
+            Register your first customer.
             <div className="empty-state-action">
               <button type="button" className="button button-primary" onClick={() => setAdding(true)}>
                 <Plus size={14} /> Register Customer
@@ -82,7 +86,10 @@ export function CustomerTable({ result, money, allowInternationalPhones, filtere
                         <Link href={href} className="row-link" onClick={(e) => e.stopPropagation()}>
                           <strong>{c.name}</strong>
                         </Link>
-                        <CustomerTypeBadge type={c.customer_type} />
+                        <span className="customer-badges">
+                          <CustomerTypeBadge type={c.customer_type} />
+                          <TagChips tagIds={c.tagIds} tags={tags} />
+                        </span>
                       </div>
                     </div>
                   </td>
@@ -129,6 +136,7 @@ export function CustomerTable({ result, money, allowInternationalPhones, filtere
                 <span className="mobile-card-title">{c.name}</span>
                 <CustomerTypeBadge type={c.customer_type} />
               </span>
+              <TagChips tagIds={c.tagIds} tags={tags} />
               <span className="mobile-card-meta">
                 <span className="mobile-card-muted">
                   {c.quoteCount} {c.quoteCount === 1 ? "document" : "documents"}

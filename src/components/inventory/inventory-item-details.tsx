@@ -5,6 +5,7 @@ import { Package, Pencil, X } from "lucide-react";
 import { asValues, attributeText, type Attribute } from "@/lib/attributes";
 import { formatMoney, formatVehicleGroups, marginPercent, type MoneyFormat } from "@/lib/format";
 import type { InventoryListItem } from "@/lib/types/inventory";
+import { formatQty, unitOptions } from "@/lib/uom";
 
 type Props = {
   item: InventoryListItem | null;
@@ -12,6 +13,8 @@ type Props = {
   /** Attribute definitions; the item's stored values show by label (archived ones too, so nothing is hidden). */
   attributes: Attribute[];
   fitment: boolean;
+  /** Settings → Units: packs switched on (packs kept while off are marked as such). */
+  packsEnabled: boolean;
   /** Full category path, e.g. "Exterior › Wrapping › Tinting Film". */
   categoryLabel: string;
   onOpenChange: (open: boolean) => void;
@@ -31,12 +34,15 @@ function Row({ label, value, mono }: { label: string; value: React.ReactNode; mo
  * Read-only product details, opened from the product name. The vendor shows
  * here only, not in the inventory table (docs/changes.md §6).
  */
-export function InventoryItemDetails({ item, money, attributes, fitment, categoryLabel, onOpenChange, onEdit }: Props) {
+export function InventoryItemDetails({ item, money, attributes, fitment, packsEnabled, categoryLabel, onOpenChange, onEdit }: Props) {
   const cost = Number(item?.cost_price ?? 0);
   const selling = Number(item?.selling_price ?? 0);
   const margin = marginPercent(cost, selling);
   const available = item ? item.quantity_on_hand - item.reserved_quantity : 0;
   const values = asValues(item?.attributes);
+  const unit = item?.base_uom?.code;
+  const packs = item ? unitOptions({ ...item, item_uom_conversions: item.conversions }).slice(1) : [];
+  const unitName = (id: string | null) => (id ? packs.find((p) => p.id === id)?.code : undefined) ?? unit ?? "—";
   const shownAttributes = attributes.filter((a) => values[a.key] !== undefined);
 
   return (
@@ -68,16 +74,24 @@ export function InventoryItemDetails({ item, money, attributes, fitment, categor
                   {shownAttributes.map((a) => (
                     <Row key={a.id} label={a.label} value={attributeText(a, values[a.key])} />
                   ))}
-                  <Row label="Cost price" value={formatMoney(cost, money)} />
+                  <Row label="Unit" value={unit ?? "—"} />
+                  {packs.length > 0 && (
+                    <Row
+                      label={packsEnabled ? "Packs" : "Packs (switched off in Settings → Units)"}
+                      value={packs.map((p) => `1 ${p.code} = ${formatQty(p.factor, unit)} · ${formatMoney(p.price, money)}`).join("\n")}
+                    />
+                  )}
+                  {packs.length > 0 && packsEnabled && <Row label="Buy in / sell in" value={`${unitName(item.purchase_uom_id)} / ${unitName(item.sale_uom_id)}`} />}
+                  <Row label={`Cost price (per ${unit ?? "unit"})`} value={formatMoney(cost, money)} />
                   <Row
-                    label="Selling price"
+                    label={`Selling price (per ${unit ?? "unit"})`}
                     value={`${formatMoney(selling, money)} ${item.price_includes_tax ? "(incl. tax)" : "(+ tax)"}`}
                   />
                   <Row label="Margin" value={margin === null ? "—" : `${margin.toFixed(1)}%`} />
-                  <Row label="On hand" value={item.quantity_on_hand} />
-                  <Row label="Reserved on quotations" value={item.reserved_quantity} />
-                  <Row label="Available to sell" value={available} />
-                  <Row label="Low-stock alert at" value={item.low_stock_threshold} />
+                  <Row label="On hand" value={formatQty(item.quantity_on_hand, unit)} />
+                  <Row label="Reserved on quotations" value={formatQty(item.reserved_quantity, unit)} />
+                  <Row label="Available to sell" value={formatQty(available, unit)} />
+                  <Row label="Low-stock alert at" value={formatQty(item.low_stock_threshold, unit)} />
                 </div>
                 {item.description && <p className="product-details-note">{item.description}</p>}
               </div>

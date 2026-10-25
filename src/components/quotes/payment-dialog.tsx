@@ -10,6 +10,7 @@ import { formatMoney, type MoneyFormat } from "@/lib/format";
 import { notify } from "@/lib/notify";
 import { allocationSummary, type LineBalance } from "@/lib/payments";
 import { paymentSchema } from "@/lib/validations/quote.schema";
+import { formatNumber } from "@/lib/uom";
 
 type Props = {
   open: boolean;
@@ -349,13 +350,13 @@ function PaymentForm({ invoiceId, number, balance, lines, money, today, onDone }
                                 type="number"
                                 min="0"
                                 max={l.quantity}
-                                step="1"
+                                step="any"
                                 value={row.qty ?? ""}
                                 placeholder="—"
                                 onChange={(e) => setQty(l, e.target.valueAsNumber)}
                                 aria-label={`Units of ${l.description}`}
                               />
-                              <small>of {l.quantity}</small>
+                              <small>of {formatNumber(l.quantity)}</small>
                             </span>
                           )}
                         </td>

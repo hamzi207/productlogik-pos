@@ -2,6 +2,7 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { documentHref, localDate, sectionForStatus, SECTION, statusDisplay, statusKey } from "@/lib/documents";
 import { formatMoney } from "@/lib/format";
+import { formatQty } from "@/lib/uom";
 import { getShopSession } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -34,7 +35,7 @@ export async function GET(request: NextRequest) {
 
   const [customers, items] = await Promise.all([
     supabase.rpc("search_customers", { p_query: q }).select("id, name, customer_type, whatsapp_number").eq("is_walk_in", false).order("name").limit(5),
-    supabase.rpc("search_inventory_items", { p_query: q }).select("id, name, sku, quantity_on_hand, reserved_quantity, selling_price").order("name").limit(5),
+    supabase.rpc("search_inventory_items", { p_query: q }).select("id, name, sku, quantity_on_hand, reserved_quantity, selling_price, base_uom:units_of_measure!inventory_items_base_uom_fkey(code)").order("name").limit(5),
   ]);
 
   // Documents: by number (draft / quotation / invoice), walk-in name, or a matching customer.
@@ -67,7 +68,7 @@ export async function GET(request: NextRequest) {
       href: `/inventory?q=${encodeURIComponent(i.sku)}`,
       title: i.name,
       detail: `${i.sku} · ${money(i.selling_price)}`,
-      badge: `${i.quantity_on_hand - i.reserved_quantity} available`,
+      badge: `${formatQty(i.quantity_on_hand - i.reserved_quantity, i.base_uom?.code)} available`,
     })),
     documents: docs.data.map((d) => ({
       href: documentHref(d),

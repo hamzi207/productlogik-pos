@@ -7,8 +7,11 @@ import { parseDashboardRange, RANGE_LABEL } from "@/lib/dashboard";
 import { localDate } from "@/lib/documents";
 import { formatMoney } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
+import { getCustomerTags } from "@/lib/customer-list-data";
+import { formatQty } from "@/lib/uom";
 import { DateRangePicker } from "@/components/dashboard/date-range-picker";
 import { CsvButton } from "@/components/reports/csv-button";
+import { ReportTagFilter } from "@/components/reports/report-tag-filter";
 import { SalesChart } from "@/components/reports/sales-chart";
 
 export const metadata: Metadata = { title: "Reports" };
@@ -21,7 +24,8 @@ type Report = {
   grain: "day" | "month" | "year";
   summary: { sales: number; tax: number; cost: number; invoices: number; outstanding: number; collected: number };
   series: { start: string; sales: number }[];
-  products: { name: string; sku: string | null; custom: boolean; qty: number; revenue: number; profit: number }[];
+  /** qty is in the product's base unit (packs converted, Phase 19). */
+  products: { name: string; sku: string | null; custom: boolean; qty: number; unit: string | null; revenue: number; profit: number }[];
   customers: { id: string; name: string; invoices: number; sales: number; outstanding: number }[];
   payments: { method: string; count: number; amount: number }[];
   aging: { notDue: Bucket; d30: Bucket; d60: Bucket; d60plus: Bucket };
@@ -31,7 +35,7 @@ type Report = {
     reserved: number;
     costValue: number;
     retailValue: number;
-    low: { name: string; sku: string; free: number; threshold: number }[];
+    low: { name: string; sku: string; free: number; threshold: number; unit: string | null }[];
   };
 };
 
@@ -68,12 +72,16 @@ function Stat({ icon, tone, label, value, note }: { icon: ReactNode; tone: strin
 }
 
 async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
-  const range = parseDashboardRange(await searchParams);
-  const [{ tenant }, supabase] = await Promise.all([getShopSession(), createClient()]);
+  const raw = await searchParams;
+  const range = parseDashboardRange(raw);
+  const [{ tenant }, supabase, tags] = await Promise.all([getShopSession(), createClient(), getCustomerTags()]);
+  // RF-19.2: ?tag= limits invoices, payments and money owed to customers with that tag.
+  const tag = tags.find((t) => t.id === raw.tag) ?? null;
   const { data, error } = await supabase.rpc("report_data", {
     p_range: range.range,
     ...(range.from ? { p_from: range.from } : {}),
     ...(range.to ? { p_to: range.to } : {}),
+    ...(tag ? { p_tag: tag.id } : {}),
   });
   if (error) {
     console.error("report_data failed:", error.message);
@@ -85,7 +93,8 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
   const net = Number(s.sales) - Number(s.tax);
   const profit = net - Number(s.cost);
   const period = r.from === r.to ? day(r.from) : `${day(r.from)} – ${day(r.to)}`;
-  const file = (name: string) => `${name}-${r.from}-to-${r.to}.csv`;
+  const file = (name: string) => `${name}${tag ? `-${tag.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}` : ""}-${r.from}-to-${r.to}.csv`;
+  const who = tag ? ` Customers tagged ${tag.name} only.` : "";
   const aging = [
     { label: "Not yet due", ...r.aging.notDue },
     { label: "1–30 days late", ...r.aging.d30 },
@@ -99,9 +108,12 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
       <div className="metrics-head report-head">
         <div>
           <h2>{range.range === "custom" ? "Custom dates" : RANGE_LABEL[range.range]}</h2>
-          <p>{period} · in your shop&apos;s timezone. Sales are invoices (including tax), not quotations.</p>
+          <p>{period} · in your shop&apos;s timezone. Sales are invoices (including tax), not quotations.{who}</p>
         </div>
-        <DateRangePicker range={range.range} from={r.from} to={r.to} today={localDate(tenant.timezone)} weekStart={tenant.weekStart} />
+        <div className="report-filters">
+          {tags.length > 0 && <ReportTagFilter tags={tags} value={tag?.id ?? null} />}
+          <DateRangePicker range={range.range} from={r.from} to={r.to} today={localDate(tenant.timezone)} weekStart={tenant.weekStart} keep={tag ? { tag: tag.id } : undefined} />
+        </div>
       </div>
 
       <div className="stat-grid report-stats">
@@ -118,20 +130,20 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
       <div className="report-grid">
         <Section
           title="Top products"
-          hint="By sales (excluding tax, after discounts) in these dates."
-          action={<CsvButton filename={file("products")} header={["Product", "SKU", "Units sold", "Sales excl. tax", "Profit", "Margin %"]} rows={r.products.map((p) => [p.name, p.sku ?? (p.custom ? "custom item" : ""), p.qty, p.revenue, p.profit, p.revenue > 0 ? Number(((p.profit / p.revenue) * 100).toFixed(1)) : null])} />}
+          hint={`By sales (excluding tax, after discounts) in these dates. Quantities are in each product's base unit.${who}`}
+          action={<CsvButton filename={file("products")} header={["Product", "SKU", "Quantity sold", "Unit", "Sales excl. tax", "Profit", "Margin %"]} rows={r.products.map((p) => [p.name, p.sku ?? (p.custom ? "custom item" : ""), p.qty, p.unit ?? "", p.revenue, p.profit, p.revenue > 0 ? Number(((p.profit / p.revenue) * 100).toFixed(1)) : null])} />}
         >
           {r.products.length === 0 ? (
             <div className="empty-state compact">No sales in these dates.</div>
           ) : (
             <div className="table-wrap">
               <table className="report-table">
-                <thead><tr><th>PRODUCT</th><th className="num">UNITS</th><th className="num">SALES</th><th className="num">PROFIT</th><th className="num">MARGIN</th></tr></thead>
+                <thead><tr><th>PRODUCT</th><th className="num">QTY</th><th className="num">SALES</th><th className="num">PROFIT</th><th className="num">MARGIN</th></tr></thead>
                 <tbody>
                   {r.products.map((p, i) => (
                     <tr key={i}>
                       <td><strong>{p.name}</strong><span>{p.sku ?? "Custom item"}</span></td>
-                      <td className="num">{p.qty}</td>
+                      <td className="num">{formatQty(Number(p.qty), p.unit)}</td>
                       <td className="num">{money(p.revenue)}</td>
                       <td className="num">{money(p.profit)}</td>
                       <td className="num">{p.revenue > 0 ? pct((p.profit / p.revenue) * 100) : "—"}</td>
@@ -145,7 +157,7 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
 
         <Section
           title="Top customers"
-          hint="By invoiced sales in these dates."
+          hint={`By invoiced sales in these dates.${who}`}
           action={<CsvButton filename={file("customers")} header={["Customer", "Invoices", "Sales", "Still owed"]} rows={r.customers.map((c) => [c.name, c.invoices, c.sales, c.outstanding])} />}
         >
           {r.customers.length === 0 ? (
@@ -171,7 +183,7 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
 
         <Section
           title="Payments by method"
-          hint="Money received in these dates."
+          hint={`Money received in these dates.${who}`}
           action={<CsvButton filename={file("payments")} header={["Method", "Payments", "Amount"]} rows={r.payments.map((p) => [p.method === "Check" ? "Cheque" : p.method, p.count, p.amount])} />}
         >
           {r.payments.length === 0 ? (
@@ -196,7 +208,7 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
 
         <Section
           title="Money owed to you (today)"
-          hint={`All unpaid invoices by how late they are: ${money(owed)} in total.`}
+          hint={`All unpaid invoices by how late they are: ${money(owed)} in total.${who}`}
           action={<CsvButton filename={`receivables-${localDate(tenant.timezone)}.csv`} header={["Age", "Invoices", "Balance"]} rows={aging.map((a) => [a.label, a.count, a.total])} />}
         >
           <div className="table-wrap">
@@ -218,8 +230,8 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
 
       <Section
         title="Stock (today)"
-        hint={`${r.stock.items} products · ${r.stock.units} units on hand (${r.stock.reserved} reserved on quotations).`}
-        action={<CsvButton filename={`low-stock-${localDate(tenant.timezone)}.csv`} header={["Product", "SKU", "Available units", "Low-stock level"]} rows={r.stock.low.map((l) => [l.name, l.sku, l.free, l.threshold])} />}
+        hint={`${r.stock.items} products in stock, across every customer.`}
+        action={<CsvButton filename={`low-stock-${localDate(tenant.timezone)}.csv`} header={["Product", "SKU", "Available", "Low-stock level", "Unit"]} rows={r.stock.low.map((l) => [l.name, l.sku, l.free, l.threshold, l.unit ?? ""])} />}
       >
         <div className="stock-values">
           <div><Boxes size={16} /><span>Stock value at cost</span><strong>{money(r.stock.costValue)}</strong></div>
@@ -236,8 +248,8 @@ async function ReportBody({ searchParams }: { searchParams: SearchParams }) {
                 {r.stock.low.map((l) => (
                   <tr key={l.sku}>
                     <td><Link href={`/inventory?q=${encodeURIComponent(l.sku)}`}><strong>{l.name}</strong></Link><span>{l.sku}</span></td>
-                    <td className={`num${l.free <= 0 ? " owed" : ""}`}>{l.free}</td>
-                    <td className="num">{l.threshold}</td>
+                    <td className={`num${l.free <= 0 ? " owed" : ""}`}>{formatQty(Number(l.free), l.unit)}</td>
+                    <td className="num">{formatQty(Number(l.threshold), l.unit)}</td>
                   </tr>
                 ))}
               </tbody>

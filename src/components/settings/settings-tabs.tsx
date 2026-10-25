@@ -3,12 +3,14 @@
 import { useEffect, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { CreditCard, FileText, Globe, Printer, Receipt, Store, Tags, Users } from "lucide-react";
+import { CreditCard, FileText, Globe, Printer, Receipt, Ruler, Store, Tags, UserCog, Users } from "lucide-react";
 
 export const SETTINGS_TABS = [
   { href: "/settings", label: "Profile", icon: Store },
   { href: "/settings/localization", label: "Localization", icon: Globe },
   { href: "/settings/categories", label: "Categories", icon: Tags },
+  { href: "/settings/units", label: "Units", icon: Ruler },
+  { href: "/settings/customers", label: "Customers", icon: UserCog },
   { href: "/settings/team", label: "Team", icon: Users },
   { href: "/settings/documents", label: "Documents", icon: FileText },
   { href: "/settings/printing", label: "Printing", icon: Printer },

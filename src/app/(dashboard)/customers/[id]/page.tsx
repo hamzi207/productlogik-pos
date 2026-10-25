@@ -21,12 +21,14 @@ import {
 } from "lucide-react";
 import { getCustomer } from "@/lib/actions/customers";
 import { getShopSession } from "@/lib/auth";
+import { getCustomerTags } from "@/lib/customer-list-data";
 import { documentHref, localDate, SECTION, sectionForStatus, statusDisplay, statusKey } from "@/lib/documents";
 import { formatDate, formatMoney } from "@/lib/format";
 import { formatPhone, whatsappLink } from "@/lib/phone";
 import { formatStrn, taxIdKind } from "@/lib/tax-id";
 import { CustomerAvatar, CustomerTypeBadge } from "@/components/customers/customer-badges";
 import { CustomerProfileActions } from "@/components/customers/customer-profile-actions";
+import { TagChips } from "@/components/customers/customer-tags";
 
 export const metadata: Metadata = { title: "Customer" };
 
@@ -72,7 +74,7 @@ function StatCard({ icon, tone, label, value, note }: { icon: ReactNode; tone: s
 
 async function CustomerProfile({ params }: { params: Params }) {
   const { id } = await params;
-  const [customer, { tenant }] = await Promise.all([getCustomer(id), getShopSession()]);
+  const [customer, { tenant }, tags] = await Promise.all([getCustomer(id), getShopSession(), getCustomerTags()]);
   if (!customer) notFound();
 
   const today = localDate(tenant.timezone);
@@ -99,6 +101,7 @@ async function CustomerProfile({ params }: { params: Params }) {
             <h1>{customer.name}</h1>
             <div className="profile-badges">
               <CustomerTypeBadge type={customer.customer_type} />
+              <TagChips tagIds={customer.tagIds} tags={tags} />
               <span className="badge">Customer since {formatDate(customer.created_at, tenant.timezone)}</span>
             </div>
           </div>
@@ -108,6 +111,7 @@ async function CustomerProfile({ params }: { params: Params }) {
           {!customer.is_walk_in && (
             <CustomerProfileActions
               customer={customer}
+              tagIds={customer.tagIds}
               allowInternationalPhones={tenant.allowInternationalPhones}
               hasQuotes={customer.quotes.length > 0}
             />

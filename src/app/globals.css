@@ -2424,4 +2424,77 @@
     .step-checks { grid-template-columns: 1fr; }
     .catalog-duplicate { margin-left: 0; flex-wrap: wrap; }
   }
+
+  /* ---- Phase 19: units of measure, customer types and tags ---- */
+  /* Item dialog: packs & other units */
+  .unit-packs-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .unit-packs-head .button { flex: none; }
+  .unit-packs-empty { display: flex; align-items: center; gap: 6px; color: var(--slate-500); font-size: 10px; }
+  .conversion-list { display: grid; gap: 10px; }
+  .conversion-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .8fr) minmax(0, 1fr) minmax(0, 1fr) 32px; align-items: end; gap: 8px; padding: 10px; border: 1px solid var(--slate-200); border-radius: 8px; background: var(--slate-50); }
+  .conversion-row label { display: block; min-width: 0; }
+  .conversion-row label > span { display: block; color: var(--slate-500); font-size: 8px; letter-spacing: .07em; font-weight: 700; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conversion-row input, .conversion-row select { width: 100%; height: 38px; border: 1px solid var(--slate-200); border-radius: 7px; outline: 0; padding: 0 10px; color: var(--slate-700); font-size: 10px; background: var(--white); }
+  .conversion-row .money-input input { padding-left: 38px; }
+  .conversion-row input:focus, .conversion-row select:focus { border-color: var(--accent-brand); box-shadow: 0 0 0 3px var(--ring-soft); }
+  .conversion-row > .icon-button { height: 38px; width: 32px; }
+  .conversion-error { grid-column: 1 / -1; }
+  .unit-defaults { margin-top: 14px; }
+  .field-note { display: block; color: var(--slate-500); font-size: 10px; line-height: 1.5; margin-top: 5px; }
+  .product-details > div strong { white-space: pre-line; }
+
+  /* Document lines: quantity stepper with its unit underneath */
+  .line-qty { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .line-unit-select { width: 100%; height: 24px; border: 1px solid var(--slate-200); border-radius: 6px; padding: 0 4px; background: var(--white); color: var(--slate-700); font-size: 10px; }
+  .line-unit-select[aria-invalid=true] { border-color: var(--red); }
+  .line-unit-label { color: var(--slate-500); font-size: 9px; text-align: center; }
+  .line-unit { display: flex; flex-direction: column; }
+  .line-per-unit { color: var(--slate-400); font-size: 9px; font-weight: 500; }
+
+  /* Customer tags (chips share .tag-chip / .tag-toggle with the console's organization tags) */
+  .tag-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--tag); flex: none; }
+  .tag-picker .tag-toggle { gap: 5px; }
+  .customer-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 4px; }
+  .customer-badges .tag-chips { margin-top: 0; }
+  .profile-badges .tag-chips { margin-top: 0; }
+  .mobile-card .tag-chips { margin-top: 0; }
+  .customer-filter-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .tag-filter { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 4px 0 8px; border: 1px solid var(--slate-200); border-radius: 8px; background: var(--white); color: var(--slate-500); flex: none; }
+  .tag-filter select { height: 100%; border: 0; outline: 0; background: transparent; color: var(--slate-700); font-size: 11px; max-width: 180px; }
+  .tag-filter.is-on { border-color: color-mix(in srgb, var(--tag) 55%, transparent); background: color-mix(in srgb, var(--tag) 10%, var(--white)); color: var(--tag); }
+  .tag-filter.is-on select { font-weight: 600; color: var(--slate-800); }
+  .tag-filter:focus-within { border-color: var(--accent-brand); box-shadow: 0 0 0 3px var(--ring-soft); }
+  .report-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .report-tag-filter { height: 36px; }
+
+  /* Customer dialog while its lists load */
+  .modal-loading { display: grid; place-items: center; gap: 8px; min-height: 220px; color: var(--slate-500); font-size: 11px; }
+
+  /* Packs switch (Settings → Units) and the product dialog's Sell in / Buy in pickers */
+  .packs-switch { margin-bottom: 4px; }
+  .unit-packs .unit-defaults { margin: 0 0 12px; }
+  .unit-packs-add { margin-top: 10px; }
+  @media (max-width: 640px) { .unit-packs-add { width: 100%; justify-content: center; } }
+
+  @media (max-width: 1024px) {
+    .conversion-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+    .conversion-row > label:nth-of-type(3), .conversion-row > label:nth-of-type(4) { grid-row: 2; }
+    .conversion-row > label:nth-of-type(3) { grid-column: 1; }
+    .conversion-row > label:nth-of-type(4) { grid-column: 2; }
+    .conversion-row > .icon-button { grid-column: 3; grid-row: 1; }
+  }
+  @media (max-width: 640px) {
+    .unit-packs-head { flex-direction: column; }
+    .unit-packs-head .button { width: 100%; justify-content: center; }
+    .conversion-row { grid-template-columns: minmax(0, 1fr) 44px; }
+    .conversion-row > label { grid-column: 1 / -1 !important; grid-row: auto !important; }
+    .conversion-row > label:first-of-type { grid-column: 1 !important; }
+    .conversion-row > .icon-button { grid-column: 2; grid-row: 1; width: 44px; height: 44px; }
+    .customer-filter-row { flex-direction: column; align-items: stretch; }
+    .tag-filter { height: 44px; }
+    .tag-filter select { max-width: none; flex: 1; font-size: 14px; }
+    .report-filters { justify-content: stretch; }
+    .report-filters > * { flex: 1 1 100%; }
+    .line-unit-select { height: 36px; font-size: 13px; }
+  }
 }

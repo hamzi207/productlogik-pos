@@ -58,19 +58,21 @@ export type ShopSession = {
     printFormat: PrintFormat;
     /** Phase 18: decides the category catalog (see getMyModules() for the switched-on modules). */
     industryId: string;
+    /** Settings → Units: products can be bought and sold in packs (boxes, cartons…). */
+    packsEnabled: boolean;
   };
   /** Set while a superadmin is acting as this shop ("Login As"): the banner shows it. */
   impersonating: { tenantName: string; expiresAt: string } | null;
 };
 
 export const TENANT_COLUMNS =
-  "id, name, slug, currency, tax_rate, timezone, show_paisa, prices_include_tax, allow_international_phones, clock_style, show_clock, clock_24_hour, show_overview_logo, week_start, print_format, quote_footer_notes, invoice_terms, quote_validity_days, phone, email, address, ntn, strn, logo_url, accent_color, industry_id";
+  "id, name, slug, currency, tax_rate, timezone, show_paisa, prices_include_tax, allow_international_phones, clock_style, show_clock, clock_24_hour, show_overview_logo, week_start, print_format, quote_footer_notes, invoice_terms, quote_validity_days, phone, email, address, ntn, strn, logo_url, accent_color, industry_id, packs_enabled";
 
 export type TenantRow = Pick<
   Tables<"tenants">,
   | "id" | "name" | "slug" | "currency" | "tax_rate" | "timezone" | "show_paisa" | "prices_include_tax"
   | "allow_international_phones" | "clock_style" | "show_clock" | "clock_24_hour" | "show_overview_logo" | "week_start" | "print_format"
-  | "quote_footer_notes" | "invoice_terms" | "quote_validity_days" | "phone" | "email" | "address" | "ntn" | "strn" | "logo_url" | "accent_color" | "industry_id"
+  | "quote_footer_notes" | "invoice_terms" | "quote_validity_days" | "phone" | "email" | "address" | "ntn" | "strn" | "logo_url" | "accent_color" | "industry_id" | "packs_enabled"
 >;
 
 export function mapTenant(tenant: TenantRow): ShopSession["tenant"] {
@@ -102,6 +104,7 @@ export function mapTenant(tenant: TenantRow): ShopSession["tenant"] {
     money: { currency: tenant.currency, showPaisa: tenant.show_paisa },
     printFormat: tenant.print_format === "pos" ? "pos" : "a4",
     industryId: tenant.industry_id,
+    packsEnabled: tenant.packs_enabled,
   };
 }
 

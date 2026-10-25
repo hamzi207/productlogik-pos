@@ -6,6 +6,8 @@ export type CustomerListItem = Tables<"customers"> & {
   quoteCount: number;
   /** Sum of invoices that are issued but not yet paid. */
   outstanding: number;
+  /** RF-19.2: ids of the customer's tags. */
+  tagIds: string[];
 };
 
 export type CustomerQuote = {
@@ -23,4 +25,5 @@ export type CustomerQuote = {
 export type CustomerDetail = Tables<"customers"> & {
   quotes: CustomerQuote[];
   outstanding: number;
+  tagIds: string[];
 };

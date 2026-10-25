@@ -11,12 +11,14 @@ import { CustomerDialog } from "./customer-dialog";
 
 type Props = {
   customer: Tables<"customers">;
+  /** RF-19.2: the customer's tags, for the edit dialog. */
+  tagIds: string[];
   allowInternationalPhones: boolean;
   /** Customers with quotes can't be deleted; the button explains why. */
   hasQuotes: boolean;
 };
 
-export function CustomerProfileActions({ customer, allowInternationalPhones, hasQuotes }: Props) {
+export function CustomerProfileActions({ customer, tagIds, allowInternationalPhones, hasQuotes }: Props) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -57,6 +59,7 @@ export function CustomerProfileActions({ customer, allowInternationalPhones, has
         onOpenChange={setEditing}
         allowInternationalPhones={allowInternationalPhones}
         customer={customer}
+        tagIds={tagIds}
       />
 
       <Dialog.Root

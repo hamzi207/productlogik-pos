@@ -4,7 +4,10 @@ import { refresh } from "next/cache";
 import { z } from "zod";
 import { getShopSession } from "@/lib/auth";
 import { isRangePastEnd, pageRange, type Paged, type Pagination } from "@/lib/pagination";
+import type { Tables } from "@/lib/types/database.types";
 import { createClient } from "@/lib/supabase/server";
+import type { CustomerTag, CustomerTypeOption } from "@/lib/customer-lists";
+import { getCustomerTags, getCustomerTypes } from "@/lib/customer-list-data";
 import type { CustomerDetail, CustomerListItem } from "@/lib/types/customer";
 import {
   customerFiltersSchema,
@@ -23,7 +26,9 @@ export type CustomerActionResult =
 
 const idSchema = z.uuid();
 
-const LIST_SELECT = "*, quotes(status, total_amount, amount_paid)";
+const LIST_SELECT = "*, quotes(status, total_amount, amount_paid), customer_tag_links(tag_id)";
+// ?tag= filter: an inner join on a second copy of the links, so the row still lists all its tags.
+const TAGGED_SELECT = `${LIST_SELECT}, tagged:customer_tag_links!inner(tag_id)`;
 
 // Unpaid (or part-paid) invoices; what is owed is the total minus payments.
 const isOutstanding = (status: string) => status === "invoiced";
@@ -32,7 +37,8 @@ const isCancelled = (status: string) => status === "cancelled" || status === "vo
 
 /** One page of the directory (A–Z). Each row's activity comes from its own documents. */
 export async function getCustomers(filters: CustomerFilters = {}, pagination: Pagination = { page: 1, limit: 25 }): Promise<Paged<CustomerListItem>> {
-  const { search, type } = customerFiltersSchema.parse(filters);
+  const { search, type, tag } = customerFiltersSchema.parse(filters);
+  const columns = tag ? TAGGED_SELECT : LIST_SELECT;
   const supabase = await createClient();
 
   // Search runs in SQL (search_customers) so phone numbers match whether typed
@@ -40,20 +46,25 @@ export async function getCustomers(filters: CustomerFilters = {}, pagination: Pa
   const build = () => {
     let query = (
       search
-        ? supabase.rpc("search_customers", { p_query: search }, { count: "exact" }).select(LIST_SELECT)
-        : supabase.from("customers").select(LIST_SELECT, { count: "exact" })
+        ? supabase.rpc("search_customers", { p_query: search }, { count: "exact" }).select(columns)
+        : supabase.from("customers").select(columns, { count: "exact" })
     )
       // The shop's walk-in / cash record isn't a directory entry.
       .eq("is_walk_in", false);
     if (type) query = query.eq("customer_type", type);
+    if (tag) query = query.eq("tagged.tag_id", tag);
     return query.order("name").order("id");
   };
 
   const { from, to } = pageRange(pagination);
-  let { data, count, error } = await build().range(from, to);
+  type Row = Tables<"customers"> & {
+    quotes: { status: string; total_amount: number; amount_paid: number }[];
+    customer_tag_links: { tag_id: string }[];
+  };
+  let { data, count, error } = await build().range(from, to).overrideTypes<Row[], { merge: false }>();
   if (isRangePastEnd(error)) {
     // Asked for a page past the end: report the total so the page can redirect.
-    ({ count, error } = await build().range(0, 0));
+    ({ count, error } = await build().range(0, 0).overrideTypes<Row[], { merge: false }>());
     data = [];
   }
   if (error) {
@@ -61,8 +72,9 @@ export async function getCustomers(filters: CustomerFilters = {}, pagination: Pa
     throw new Error("Could not load customers.");
   }
 
-  const rows = (data ?? []).map(({ quotes, ...customer }) => ({
+  const rows = (data ?? []).map(({ quotes, customer_tag_links, ...customer }) => ({
     ...customer,
+    tagIds: customer_tag_links.map((l) => l.tag_id),
     quoteCount: quotes.filter((q) => !isCancelled(q.status)).length,
     outstanding: quotes.filter((q) => isOutstanding(q.status)).reduce((sum, q) => sum + owed(q), 0),
   }));
@@ -89,7 +101,7 @@ export async function getCustomer(id: string): Promise<CustomerDetail | null> {
   const { data, error } = await supabase
     .from("customers")
     .select(
-      "*, quotes(id, quote_number, status, total_amount, amount_paid, due_date, created_at, walk_in_name)",
+      "*, quotes(id, quote_number, status, total_amount, amount_paid, due_date, created_at, walk_in_name), customer_tag_links(tag_id)",
     )
     .eq("id", id)
     .order("created_at", { referencedTable: "quotes", ascending: false })
@@ -101,18 +113,26 @@ export async function getCustomer(id: string): Promise<CustomerDetail | null> {
   }
   if (!data) return null;
 
-  const { quotes, ...customer } = data;
+  const { quotes, customer_tag_links, ...customer } = data;
   return {
     ...customer,
+    tagIds: customer_tag_links.map((l) => l.tag_id),
     quotes: quotes.map((q) => ({ ...q, total_amount: Number(q.total_amount), amount_paid: Number(q.amount_paid) })),
     outstanding: quotes.filter((q) => isOutstanding(q.status)).reduce((sum, q) => sum + owed(q), 0),
   };
 }
 
-/** Validates against the shop's *current* phone setting, read on the server. */
+/** What the customer dialog needs: the organization's customer types and tags (Phase 19). */
+export async function getCustomerFormOptions(): Promise<{ types: CustomerTypeOption[]; tags: CustomerTag[] }> {
+  const [types, tags] = await Promise.all([getCustomerTypes(), getCustomerTags()]);
+  return { types, tags };
+}
+
+/** Validates against the shop's *current* phone setting and customer types, read on the server. */
 async function validate(input: CustomerFormValues) {
-  const session = await getShopSession();
-  const parsed = customerSchema(session.tenant.allowInternationalPhones).safeParse(input);
+  const [session, types] = await Promise.all([getShopSession(), getCustomerTypes()]);
+  const taxTypes = new Set(types.filter((t) => t.requires_tax_details).map((t) => t.name));
+  const parsed = customerSchema(session.tenant.allowInternationalPhones, (type) => taxTypes.has(type)).safeParse(input);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return {
@@ -152,6 +172,12 @@ const CONSTRAINT_ERRORS: Record<string, { field: keyof CustomerInput; message: s
 };
 
 function dbError(error: { code?: string; message: string }, action: string): CustomerActionResult {
+  // Customer type rules (customers_check_type) explain themselves.
+  if (error.code === "23514" && error.message.includes("customer type")) return { status: "error", field: "customerType", message: error.message };
+  if (error.code === "23514" && error.message.includes("need a CNIC")) return { status: "error", field: "cnicOrNtn", message: error.message };
+  if (error.code === "23503" && error.message.includes("customer_type")) {
+    return { status: "error", field: "customerType", message: "That customer type no longer exists. Choose another one." };
+  }
   console.error(`${action} failed:`, error);
   if (error.code === "23514") {
     const known = Object.entries(CONSTRAINT_ERRORS).find(([name]) => error.message.includes(name));
@@ -172,6 +198,8 @@ export async function createCustomer(input: CustomerFormValues): Promise<Custome
     .select("id")
     .single();
   if (error) return dbError(error, "createCustomer");
+  const tagged = await saveTags(data.id, v.data.tagIds);
+  if (tagged) return tagged;
 
   refresh();
   return { status: "success", id: data.id };
@@ -192,9 +220,64 @@ export async function updateCustomer(id: string, input: CustomerFormValues): Pro
   if (data.length === 0) {
     return { status: "error", message: "This customer no longer exists. They may have been deleted." };
   }
+  const tagged = await saveTags(id, v.data.tagIds);
+  if (tagged) return tagged;
 
   refresh();
   return { status: "success", id };
+}
+
+/** RF-19.2: replaces the customer's tags; returns an error result only when that fails. */
+async function saveTags(id: string, tagIds: string[]): Promise<CustomerActionResult | null> {
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("set_customer_tags", { p_customer_id: id, p_tag_ids: tagIds });
+  if (!error) return null;
+  console.error("set_customer_tags failed:", error);
+  refresh();
+  return { status: "error", field: "tagIds", message: "The details were saved, but the tags weren't. Please try again." };
+}
+
+/** "Export CSV" on the customer directory: every customer (not the walk-in record), with their tags (RF-19.2). */
+export async function exportCustomersCsv(): Promise<{ status: "success"; header: string[]; rows: (string | number)[][] } | { status: "error"; message: string }> {
+  const supabase = await createClient();
+  const tags = new Map((await getCustomerTags()).map((t) => [t.id, t.name]));
+  const all: (Tables<"customers"> & { customer_tag_links: { tag_id: string }[] })[] = [];
+  // PostgREST returns at most 1000 rows per request: page through everything.
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase
+      .from("customers")
+      .select("*, customer_tag_links(tag_id)")
+      .eq("is_walk_in", false)
+      .order("name")
+      .order("id")
+      .range(from, from + 999);
+    if (error) {
+      console.error("exportCustomersCsv failed:", error.message);
+      return { status: "error", message: "We couldn't export the customers. Please try again." };
+    }
+    all.push(...data);
+    if (data.length < 1000) break;
+  }
+  return {
+    status: "success",
+    header: ["Name", "Type", "Tags", "Contact Person", "WhatsApp", "Phone", "Email", "Billing Address", "CNIC / NTN", "Tax Registration", "STRN", "Credit Days", "Default Discount %", "Notes"],
+    rows: all.map((c) => [
+      c.name,
+      c.customer_type,
+      c.customer_tag_links.flatMap((l) => tags.get(l.tag_id) ?? []).sort((a, b) => a.localeCompare(b)).join("; "),
+      c.contact_person ?? "",
+      c.whatsapp_number ?? "",
+      c.phone ?? "",
+      c.email ?? "",
+      c.billing_address ?? "",
+      c.cnic_or_ntn ?? "",
+      c.tax_registration_status === "registered" ? "Registered" : "Not registered",
+      c.strn ?? "",
+      c.credit_days,
+      Number(c.default_discount_percentage),
+      c.notes ?? "",
+    ]),
+  };
 }
 
 /** Customers with quotes can't be deleted (quotes.customer_id is ON DELETE RESTRICT). */

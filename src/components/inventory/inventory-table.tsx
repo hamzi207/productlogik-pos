@@ -7,6 +7,7 @@ import { buildCategoryIndex, categoryIcon, fullPath, shortPath, type Category } 
 import { formatMoney, formatVehicleGroups, marginPercent, type MoneyFormat } from "@/lib/format";
 import type { InventoryPage } from "@/lib/actions/inventory";
 import type { InventoryListItem } from "@/lib/types/inventory";
+import { formatQty, type Unit } from "@/lib/uom";
 import { CategoryBadge } from "@/components/categories/category-tree";
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import { DeleteItemDialog } from "./delete-item-dialog";
@@ -21,6 +22,10 @@ type Props = {
   pricesIncludeTax: boolean;
   categories: Category[];
   attributes: Attribute[];
+  /** The organization's units of measure (for the product dialog). */
+  units: Unit[];
+  /** Settings → Units: packs switched on. */
+  packsEnabled: boolean;
   /** Vehicle Fitment module on: the fitment and vehicle columns show. */
   fitment: boolean;
   /** True when a search/category/stock/fitment filter is active (changes the empty state). */
@@ -74,24 +79,29 @@ export const availableOf = (item: Pick<InventoryListItem, "quantity_on_hand" | "
 function StockCell({ item }: { item: InventoryListItem }) {
   const available = availableOf(item);
   const low = available <= item.low_stock_threshold;
+  const unit = item.base_uom?.code;
   return (
     <div className="stock-cell">
       {low ? (
-        <span className="badge badge-red" title={`Alert level: ${item.low_stock_threshold}`}>
+        <span className="badge badge-red" title={`Alert level: ${formatQty(item.low_stock_threshold, unit)}`}>
           <AlertTriangle size={12} />
-          {available <= 0 ? "None available" : `${available} available`} · Min {item.low_stock_threshold}
+          {available <= 0 ? "None available" : `${formatQty(available, unit)} available`} · Min {formatQty(item.low_stock_threshold)}
         </span>
       ) : (
-        <span className="badge badge-green">{available} available</span>
+        <span className="badge badge-green">{formatQty(available, unit)} available</span>
       )}
       <span className="stock-split">
-        {item.quantity_on_hand} on hand{item.reserved_quantity > 0 ? ` · ${item.reserved_quantity} reserved` : ""}
+        {formatQty(item.quantity_on_hand, unit)} on hand{item.reserved_quantity > 0 ? ` · ${formatQty(item.reserved_quantity)} reserved` : ""}
       </span>
     </div>
   );
 }
 
-export function InventoryTable({ result, money, pricesIncludeTax, categories, attributes, fitment, filtered }: Props) {
+/** "per kg" under prices for anything not sold by the piece. */
+const perUnit = (item: InventoryListItem) =>
+  item.base_uom && item.base_uom.code.toLowerCase() !== "pcs" ? ` · per ${item.base_uom.code}` : "";
+
+export function InventoryTable({ result, money, pricesIncludeTax, categories, attributes, units, packsEnabled, fitment, filtered }: Props) {
   const items = result.rows;
   const index = useMemo(() => buildCategoryIndex(categories), [categories]);
   const [editing, setEditing] = useState<InventoryListItem | null>(null);
@@ -178,7 +188,7 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
                     <td>{formatMoney(cost, money)}</td>
                     <td className="amount">
                       {formatMoney(selling, money)}
-                      <span className="price-tax-note">{item.price_includes_tax ? "incl. tax" : "+ tax"}</span>
+                      <span className="price-tax-note">{item.price_includes_tax ? "incl. tax" : "+ tax"}{perUnit(item)}</span>
                     </td>
                     <td><MarginBadge cost={cost} selling={selling} /></td>
                     <td><StockCell item={item} /></td>
@@ -220,8 +230,8 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
                       {category && <CategoryBadge node={category} label={shortPath(category)} title={fullPath(category)} />}
                       <span className={`badge ${low ? "badge-red" : "badge-green"}`}>
                         {low && <AlertTriangle size={11} />}
-                        {available <= 0 ? "None available" : `${available} available`}
-                        {item.reserved_quantity > 0 ? ` · ${item.reserved_quantity} reserved` : ""}
+                        {available <= 0 ? "None available" : `${formatQty(available, item.base_uom?.code)} available`}
+                        {item.reserved_quantity > 0 ? ` · ${formatQty(item.reserved_quantity)} reserved` : ""}
                       </span>
                     </span>
                   </button>
@@ -253,6 +263,8 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
         pricesIncludeTax={pricesIncludeTax}
         categories={categories}
         attributes={attributes}
+        units={units}
+        packsEnabled={packsEnabled}
         fitment={fitment}
         item={editing ?? undefined}
       />
@@ -262,6 +274,7 @@ export function InventoryTable({ result, money, pricesIncludeTax, categories, at
         money={money}
         attributes={attributes}
         fitment={fitment}
+        packsEnabled={packsEnabled}
         categoryLabel={viewing ? (() => { const c = index.byId.get(viewing.category_id); return c ? fullPath(c) : "—"; })() : ""}
         onOpenChange={(open) => !open && setViewing(null)}
         onEdit={(item) => {

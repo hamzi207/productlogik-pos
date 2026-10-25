@@ -11,9 +11,9 @@ import { inventoryItemSchema, type InventoryItemInput } from "@/lib/validations/
 // The console's Products tab (Phase 18, from the superadmin review): view, add, edit and delete one
 // organization's products. Service role on inventory_items; the database still checks the category (visible
 // to that organization, not archived), attributes, SKU uniqueness, reserved stock and the plan's product
-// limit. Vehicle fitment is left as it is (edit that in the shop with Login As). Audited.
+// limit. Vehicle fitment and pack units (Phase 19) are left as they are (edit those in the shop with Login As). Audited.
 
-export type ProductInput = Omit<InventoryItemInput, "isUniversal" | "vehicleIds">;
+export type ProductInput = Omit<InventoryItemInput, "isUniversal" | "vehicleIds" | "conversions" | "purchaseUomId" | "saleUomId">;
 export type ProductResult = { status: "success" } | { status: "error"; message: string; field?: string };
 
 const uuid = z.uuid();
@@ -28,11 +28,12 @@ function saveError(error: { code?: string; message: string; details?: string | n
       if (error.message.includes("inventory_reserved_within_stock")) {
         return { status: "error", field: "quantityOnHand", message: "Stock can't go below what open quotations have reserved." };
       }
-      break;
+      // Unit rules (e.g. the base unit of a product already on documents) explain themselves.
+      return { status: "error", message: error.message };
     case "22023":
     case "23503":
     case "P0001":
-      // Category and attribute triggers explain themselves.
+      // Category, attribute and unit triggers explain themselves.
       return { status: "error", message: error.message };
   }
   console.error("admin product save failed:", error);
@@ -43,7 +44,7 @@ function saveError(error: { code?: string; message: string; details?: string | n
 export async function saveTenantProduct(tenantId: string, input: ProductInput, id?: string): Promise<ProductResult> {
   const me = await requireSuperadmin();
   if (!uuid.safeParse(tenantId).success || (id && !uuid.safeParse(id).success)) return { status: "error", message: "Invalid product." };
-  const parsed = inventoryItemSchema.safeParse({ ...input, isUniversal: true, vehicleIds: [] });
+  const parsed = inventoryItemSchema.safeParse({ ...input, isUniversal: true, vehicleIds: [], conversions: [], purchaseUomId: null, saleUomId: null });
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return { status: "error", message: issue.message, field: String(issue.path[0] ?? "") };
@@ -61,14 +62,19 @@ export async function saveTenantProduct(tenantId: string, input: ProductInput, i
     low_stock_threshold: p.lowStockThreshold,
     price_includes_tax: p.priceIncludesTax,
     attributes: p.attributes as Json,
+    base_uom_id: p.baseUomId,
   };
   const admin = createAdminClient();
+  const { data: unit } = await admin.from("units_of_measure").select("id").eq("id", p.baseUomId).eq("tenant_id", tenantId).maybeSingle();
+  if (!unit) return { status: "error", field: "baseUomId", message: "Choose one of this organization's units." };
 
   if (id) {
     const { data: before } = await admin.from("inventory_items").select("*").eq("id", id).eq("tenant_id", tenantId).maybeSingle();
     if (!before) return { status: "error", message: "This product no longer exists." };
     const { error } = await admin.from("inventory_items").update({ ...row, updated_at: new Date().toISOString() }).eq("id", id).eq("tenant_id", tenantId);
     if (error) return saveError(error, p.sku);
+    // A pack unit that just became the base unit isn't a conversion any more (as save_inventory_item does).
+    await admin.from("item_uom_conversions").delete().eq("item_id", id).eq("uom_id", p.baseUomId);
     const diff = changedFields(before, row);
     if (Object.keys(diff.after).length) await audit({ adminId: me.userId, action: "product.update", tenantId, details: { id, sku: p.sku, ...diff } });
   } else {

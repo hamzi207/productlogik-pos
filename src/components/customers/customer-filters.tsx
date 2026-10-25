@@ -4,22 +4,21 @@ import { useEffect, useState, useTransition } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Loader2, Search, X } from "lucide-react";
 import { SEARCH_DELAY_MS } from "@/lib/search-delay";
-import { CUSTOMER_TYPES, type CustomerType } from "@/lib/validations/customer.schema";
+import { tagStyle } from "./customer-tags";
+import type { CustomerTag, CustomerTypeOption } from "@/lib/customer-lists";
 
-const PILL_LABEL: Record<CustomerType, string> = {
-  Dealership: "Dealerships",
-  "Fleet Account": "Fleet",
-  "Retail Customer": "Retail",
-};
-
-/** Search + type filter, kept in the URL (?q=&type=) like the inventory filters. */
-export function CustomerFilters() {
+/** Search + type and tag filters, kept in the URL (?q=&type=&tag=) like the inventory filters. */
+export function CustomerFilters({ types, tags }: { types: CustomerTypeOption[]; tags: CustomerTag[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
 
   const type = params.get("type") ?? "";
+  const tag = params.get("tag") ?? "";
+  // Active types, plus the filtered one if it was archived since.
+  const pills = types.filter((t) => !t.is_archived || t.name === type).map((t) => t.name);
+  const activeTag = tags.find((t) => t.id === tag);
   const urlSearch = params.get("q") ?? "";
   const [search, setSearch] = useState(urlSearch);
 
@@ -59,18 +58,31 @@ export function CustomerFilters() {
           </button>
         )}
       </div>
-      <div className="category-pills" role="group" aria-label="Customer type">
-        {["", ...CUSTOMER_TYPES].map((t) => (
-          <button
-            key={t || "all"}
-            type="button"
-            className={type === t ? "active" : ""}
-            aria-pressed={type === t}
-            onClick={() => update({ type: t })}
-          >
-            {t ? PILL_LABEL[t as CustomerType] : "All customers"}
-          </button>
-        ))}
+      <div className="customer-filter-row">
+        <div className="category-pills" role="group" aria-label="Customer type">
+          {["", ...pills].map((t) => (
+            <button
+              key={t || "all"}
+              type="button"
+              className={type === t ? "active" : ""}
+              aria-pressed={type === t}
+              onClick={() => update({ type: t })}
+            >
+              {t || "All customers"}
+            </button>
+          ))}
+        </div>
+        {tags.length > 0 && (
+          <label className={`tag-filter${activeTag ? " is-on" : ""}`} style={activeTag ? tagStyle(activeTag.color) : undefined}>
+            <span className="sr-only">Tag</span>
+            <select value={activeTag ? tag : ""} onChange={(e) => update({ tag: e.target.value })}>
+              <option value="">All tags</option>
+              {tags.map((t) => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
     </div>
   );

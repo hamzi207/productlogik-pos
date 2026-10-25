@@ -2,6 +2,7 @@ import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/render
 import { formatMoney } from "@/lib/format";
 import { FONT, FONT_BOLD } from "./fonts";
 import type { PrintableDocument } from "@/lib/printable";
+import { formatQty } from "@/lib/uom";
 
 // Vector PDF for quotations, invoices and estimates (PROJECT_SPEC Phase 6).
 // Slate text; the organization's accent colour (doc.shop.accent, RF-16.1) on the header rule, title and
@@ -35,8 +36,9 @@ const s = StyleSheet.create({
   th: { flexDirection: "row", backgroundColor: INK, color: "#ffffff", paddingVertical: 6, paddingHorizontal: 6, fontSize: 7.5, fontFamily: FONT_BOLD, letterSpacing: 0.5 },
   tr: { flexDirection: "row", paddingVertical: 6, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: LINE },
   cNo: { width: "5%" },
-  cItem: { width: "37%", paddingRight: 6 },
-  cQty: { width: "8%", textAlign: "right" },
+  cItem: { width: "34%", paddingRight: 6 },
+  // Wide enough for "1.25 kg" / "12 pcs" (Phase 19 units).
+  cQty: { width: "11%", textAlign: "right" },
   cNum: { width: "12.5%", textAlign: "right" },
   sku: { fontSize: 7.5, color: MUTED, marginTop: 1 },
   bottom: { flexDirection: "row", justifyContent: "space-between", marginTop: 14 },
@@ -160,7 +162,7 @@ export function DocumentPdf({ doc, logo }: Props) {
               {l.details && <Text style={s.sku}>{l.details}</Text>}
               {l.sku && <Text style={s.sku}>{l.sku}</Text>}
             </View>
-            <Text style={s.cQty}>{l.quantity}</Text>
+            <Text style={s.cQty}>{formatQty(l.quantity, l.unit)}</Text>
             <Text style={s.cNum}>{money(l.unitPrice)}</Text>
             <Text style={s.cNum}>{l.discount > 0 ? `−${money(l.discount)}` : ""}</Text>
             <Text style={s.cNum}>{money(l.salePrice)}</Text>

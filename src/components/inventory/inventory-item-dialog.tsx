@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "radix-ui";
-import { Controller, useForm, useWatch } from "react-hook-form";
+import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Car, CheckCircle2, Loader2, Package, Plus, Save, Wand2, X } from "lucide-react";
+import { Boxes, Car, CheckCircle2, Loader2, Package, Plus, Save, Trash2, Wand2, X } from "lucide-react";
 import { createInventoryItem, updateInventoryItem } from "@/lib/actions/inventory";
 import { formatMoney, marginPercent } from "@/lib/format";
 import { notify } from "@/lib/notify";
@@ -14,9 +14,16 @@ import { AttributeFields } from "@/components/categories/attribute-fields";
 import { useDiscardGuard } from "@/components/shared/discard-changes";
 import { ModalSheet } from "@/components/shared/modal-sheet";
 import type { FitmentVehicle, InventoryListItem } from "@/lib/types/inventory";
+import { formatNumber, formatQty, stepFor, type Unit } from "@/lib/uom";
 import { inventoryItemSchema, type InventoryItemInput } from "@/lib/validations/inventory.schema";
 import { CategoryPicker } from "./category-picker";
 import { YmmCompatibilitySelector } from "./ymm-compatibility-selector";
+
+/** New products start in pieces, else the first active unit. */
+function defaultUnit(units: Unit[]) {
+  const active = units.filter((u) => !u.is_archived);
+  return active.find((u) => u.code.toLowerCase() === "pcs") ?? active[0];
+}
 
 /** Prefix from the main category (e.g. EXT-4K9QZ). */
 function generateSku(index: CategoryIndex, categoryId: string | undefined) {
@@ -35,12 +42,16 @@ type Props = {
   attributes: Attribute[];
   /** Vehicle Fitment module on: shows Universal Fit / Vehicle Specific and the vehicle picker. */
   fitment: boolean;
+  /** The organization's units of measure (Phase 19), archived ones too. */
+  units: Unit[];
+  /** Settings → Units: packs switched on (else the Packs section is hidden and existing packs kept as they are). */
+  packsEnabled: boolean;
   /** Edit this item; omit to create a new one. */
   item?: InventoryListItem;
 };
 
 /** Add / edit inventory product modal (Figma "Add inventory product"). */
-export function InventoryItemDialog({ open, onOpenChange, currency, pricesIncludeTax, categories, attributes, fitment, item }: Props) {
+export function InventoryItemDialog({ open, onOpenChange, currency, pricesIncludeTax, categories, attributes, fitment, units, packsEnabled, item }: Props) {
   // Closing with unsaved edits asks first (Cancel, X, Escape, clicking outside).
   const guard = useDiscardGuard({
     onOpenChange,
@@ -60,6 +71,8 @@ export function InventoryItemDialog({ open, onOpenChange, currency, pricesInclud
               categories={categories}
               attributes={attributes}
               fitment={fitment}
+              units={units}
+              packsEnabled={packsEnabled}
               onDirtyChange={guard.setDirty}
               onDone={guard.close}
             />
@@ -78,6 +91,8 @@ function ItemForm({
   categories,
   attributes,
   fitment,
+  units,
+  packsEnabled,
   onDirtyChange,
   onDone,
 }: {
@@ -87,6 +102,8 @@ function ItemForm({
   categories: Category[];
   attributes: Attribute[];
   fitment: boolean;
+  units: Unit[];
+  packsEnabled: boolean;
   onDirtyChange: (dirty: boolean) => void;
   onDone: () => void;
 }) {
@@ -116,6 +133,15 @@ function ItemForm({
           sellingPrice: Number(item.selling_price),
           quantityOnHand: item.quantity_on_hand,
           lowStockThreshold: item.low_stock_threshold,
+          baseUomId: item.base_uom_id,
+          conversions: item.conversions.map((c) => ({
+            uomId: c.uom_id,
+            factor: c.factor,
+            sellingPrice: c.selling_price,
+            barcode: c.barcode ?? "",
+          })),
+          purchaseUomId: item.purchase_uom_id,
+          saleUomId: item.sale_uom_id,
           priceIncludesTax: item.price_includes_tax,
           isUniversal: item.is_universal,
           vehicleIds: item.vehicles.map((v) => v.id),
@@ -128,6 +154,10 @@ function ItemForm({
           vendorName: "",
           quantityOnHand: 0,
           lowStockThreshold: 5,
+          baseUomId: defaultUnit(units)?.id,
+          conversions: [],
+          purchaseUomId: null,
+          saleUomId: null,
           priceIncludesTax: pricesIncludeTax,
           isUniversal: true,
           vehicleIds: [],
@@ -137,10 +167,57 @@ function ItemForm({
 
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
 
-  const [cost, selling, isUniversal, categoryId, attributeValues] = useWatch({
+  const { fields: conversionFields, append: addConversion, remove: removeConversion } = useFieldArray({ control, name: "conversions" });
+
+  const [cost, selling, isUniversal, categoryId, attributeValues, baseUomId, conversions] = useWatch({
     control,
-    name: ["costPrice", "sellingPrice", "isUniversal", "categoryId", "attributes"],
+    name: ["costPrice", "sellingPrice", "isUniversal", "categoryId", "attributes", "baseUomId", "conversions"],
   });
+  const unitById = new Map(units.map((u) => [u.id, u]));
+  const baseUnit = unitById.get(baseUomId);
+  const baseCode = baseUnit?.code ?? "units";
+  // Archived units stay listed only where they're already in use.
+  const usedIds = new Set([item?.base_uom_id, ...(item?.conversions ?? []).map((c) => c.uom_id)]);
+  const choosable = units.filter((u) => !u.is_archived || usedIds.has(u.id));
+  /** Units the product's packs can use: those marked as packs in Settings → Units (plus any it already has). */
+  const packChoices = (current?: string) => choosable.filter((u) => u.id !== baseUomId && (u.is_pack || u.id === current));
+  /** Sell in / Buy in: the product's own unit, its packs, then the other pack units (picking one adds it). */
+  const packFactor = new Map((conversions ?? []).filter((c) => c.uomId).map((c) => [c.uomId, c.factor]));
+  const unitChoices = [
+    ...(conversions ?? []).flatMap((c) => {
+      const unit = c.uomId && c.uomId !== baseUomId ? unitById.get(c.uomId) : undefined;
+      return unit ? [unit] : [];
+    }),
+    ...packChoices().filter((u) => !packFactor.has(u.id)),
+  ];
+  const choiceLabel = (u: Unit) => {
+    const factor = packFactor.get(u.id);
+    if (factor === undefined) return `${u.name} (${u.code}) · new pack`;
+    return Number.isFinite(factor) && factor > 0 ? `${u.name} (${u.code}) · ${formatNumber(factor)} ${baseCode}` : `${u.name} (${u.code})`;
+  };
+  /** Choosing a pack the product doesn't have yet adds its row, ready for "holds how many". */
+  const unitPicker = (key: "purchaseUomId" | "saleUomId") => {
+    const field = register(key, { setValueAs: (v) => v || null });
+    return {
+      ...field,
+      onChange: async (event: { target: { value: string } }) => {
+        await field.onChange(event);
+        const id = event.target.value;
+        const rows = getValues("conversions") ?? [];
+        if (id && !rows.some((c) => c.uomId === id)) {
+          addConversion({ uomId: id, factor: Number.NaN, sellingPrice: null, barcode: "" }, { focusName: `conversions.${rows.length}.factor` });
+        }
+      },
+    };
+  };
+  /** Removing a unit that's the purchase / sale unit puts those back on the base unit. */
+  const dropConversion = (index: number) => {
+    const id = getValues(`conversions.${index}.uomId`);
+    removeConversion(index);
+    for (const key of ["purchaseUomId", "saleUomId"] as const) {
+      if (id && getValues(key) === id) setValue(key, null, { shouldDirty: true });
+    }
+  };
   const attributeFields = applicableAttributes(attributes, index, categoryId);
   const margin =
     Number.isFinite(cost) && Number.isFinite(selling) ? marginPercent(cost, selling) : null;
@@ -172,12 +249,12 @@ function ItemForm({
     }
     notify.success(
       isEdit ? `${values.name} updated` : `${values.name} added to inventory`,
-      `${values.sku} · ${values.quantityOnHand} on hand · ${formatMoney(values.sellingPrice, { currency, showPaisa: true })}${!fitment ? "" : values.isUniversal ? " · Universal Fit" : ` · fits ${values.vehicleIds.length} vehicle${values.vehicleIds.length === 1 ? "" : "s"}`}`,
+      `${values.sku} · ${formatQty(values.quantityOnHand, baseCode)} on hand · ${formatMoney(values.sellingPrice, { currency, showPaisa: true })}${!fitment ? "" : values.isUniversal ? " · Universal Fit" : ` · fits ${values.vehicleIds.length} vehicle${values.vehicleIds.length === 1 ? "" : "s"}`}`,
     );
     onDone();
   });
 
-  const fieldError = (name: Exclude<keyof InventoryItemInput, "attributes">) =>
+  const fieldError = (name: Exclude<keyof InventoryItemInput, "attributes" | "conversions">) =>
     errors[name]?.message ? (
       <span className="field-error" id={`${name}-error`}>{errors[name]?.message}</span>
     ) : null;
@@ -274,13 +351,26 @@ function ItemForm({
             <textarea rows={2} placeholder={fitment ? "Notes for your team: brand, spec, roll size…" : "Notes for your team: brand, size, pack…"} {...invalid("description")} {...register("description")} />
             {fieldError("description")}
           </label>
-          <label className="span-two">
+          <label>
             <span>VENDOR / SUPPLIER (OPTIONAL)</span>
             <input placeholder={fitment ? "e.g. Lahore Auto Traders" : "e.g. the supplier you buy it from"} {...invalid("vendorName")} {...register("vendorName")} />
             {fieldError("vendorName")}
           </label>
           <label>
-            <span>COST PRICE</span>
+            <span>UNIT</span>
+            <select {...invalid("baseUomId")} {...register("baseUomId")}>
+              {choosable.map((u) => (
+                <option key={u.id} value={u.id}>{u.name} ({u.code})</option>
+              ))}
+            </select>
+            {fieldError("baseUomId") ?? (
+              <span className="field-note">
+                Stock, prices and alerts are counted in this unit.{!packsEnabled && " To sell by the box or carton, an admin can switch packs on in Settings → Units."}
+              </span>
+            )}
+          </label>
+          <label>
+            <span>COST PRICE · PER {baseCode.toUpperCase()}</span>
             <div className="money-input">
               <span>{currency}</span>
               <input type="number" inputMode="decimal" step="0.01" min="0" placeholder="0.00" {...invalid("costPrice")} {...register("costPrice", { valueAsNumber: true })} />
@@ -288,7 +378,7 @@ function ItemForm({
             {fieldError("costPrice")}
           </label>
           <label>
-            <span>SELLING PRICE</span>
+            <span>SELLING PRICE · PER {baseCode.toUpperCase()}</span>
             <div className="money-input">
               <span>{currency}</span>
               <input type="number" inputMode="decimal" step="0.01" min="0" placeholder="0.00" {...invalid("sellingPrice")} {...register("sellingPrice", { valueAsNumber: true })} />
@@ -302,15 +392,15 @@ function ItemForm({
           </label>
           <label>
             <span>{isEdit ? "STOCK ON HAND" : "STARTING STOCK"}</span>
-            <input type="number" inputMode="numeric" step="1" min="0" {...invalid("quantityOnHand")} {...register("quantityOnHand", { valueAsNumber: true })} />
+            <input type="number" inputMode={baseUnit?.decimals ? "decimal" : "numeric"} step={stepFor(baseUnit?.decimals ?? 0)} min="0" {...invalid("quantityOnHand")} {...register("quantityOnHand", { valueAsNumber: true })} />
             {fieldError("quantityOnHand") ??
               (item && item.reserved_quantity > 0 && (
-                <span className="field-note">{item.reserved_quantity} reserved on open quotations.</span>
+                <span className="field-note">{formatQty(item.reserved_quantity, item.base_uom?.code)} reserved on open quotations.</span>
               ))}
           </label>
           <label>
             <span>LOW STOCK ALERT AT</span>
-            <input type="number" inputMode="numeric" step="1" min="0" {...invalid("lowStockThreshold")} {...register("lowStockThreshold", { valueAsNumber: true })} />
+            <input type="number" inputMode={baseUnit?.decimals ? "decimal" : "numeric"} step={stepFor(baseUnit?.decimals ?? 0)} min="0" {...invalid("lowStockThreshold")} {...register("lowStockThreshold", { valueAsNumber: true })} />
             {fieldError("lowStockThreshold")}
           </label>
           <label className="span-two check-field">
@@ -321,6 +411,104 @@ function ItemForm({
             </div>
           </label>
         </div>
+
+        {packsEnabled && (
+        <div className="compatibility unit-packs">
+          <div className="unit-packs-head">
+            <div>
+              <h3>Packs &amp; selling units</h3>
+              <p>Sell or buy this product by the box, carton, dozen… Stock is still counted in {baseCode}.</p>
+            </div>
+          </div>
+          <div className="form-grid unit-defaults">
+            <label>
+              <span>SELL IN</span>
+              <select {...invalid("saleUomId")} {...unitPicker("saleUomId")}>
+                <option value="">{baseUnit ? `${baseUnit.name} (${baseCode})` : "Base unit"}</option>
+                {unitChoices.map((u) => (
+                  <option key={u.id} value={u.id}>{choiceLabel(u)}</option>
+                ))}
+              </select>
+              {fieldError("saleUomId") ?? <span className="field-note">New invoice and quotation lines start in this unit.</span>}
+            </label>
+            <label>
+              <span>BUY IN</span>
+              <select {...invalid("purchaseUomId")} {...unitPicker("purchaseUomId")}>
+                <option value="">{baseUnit ? `${baseUnit.name} (${baseCode})` : "Base unit"}</option>
+                {unitChoices.map((u) => (
+                  <option key={u.id} value={u.id}>{choiceLabel(u)}</option>
+                ))}
+              </select>
+              {fieldError("purchaseUomId") ?? <span className="field-note">The unit you usually order it in (for purchase orders).</span>}
+            </label>
+          </div>
+          {conversionFields.length === 0 ? (
+            <p className="unit-packs-empty"><Boxes size={14} /> No packs: sold and bought in {baseCode} only.</p>
+          ) : (
+            <div className="conversion-list">
+              {conversionFields.map((field, i) => {
+                const rowErrors = errors.conversions?.[i];
+                const factor = conversions?.[i]?.factor;
+                const autoPrice = Number.isFinite(selling) && Number.isFinite(factor) ? Math.round(selling * factor * 100) / 100 : null;
+                const message = rowErrors?.uomId?.message ?? rowErrors?.factor?.message ?? rowErrors?.sellingPrice?.message ?? rowErrors?.barcode?.message;
+                return (
+                  <div className="conversion-row" key={field.id}>
+                    <label>
+                      <span>PACK</span>
+                      <select aria-invalid={rowErrors?.uomId ? true : undefined} {...register(`conversions.${i}.uomId`)}>
+                        <option value="">Choose…</option>
+                        {packChoices(conversions?.[i]?.uomId).map((u) => (
+                          <option key={u.id} value={u.id}>{u.name} ({u.code})</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>HOLDS ({baseCode.toUpperCase()})</span>
+                      <input type="number" inputMode="decimal" step="any" min="0" placeholder="e.g. 12" aria-invalid={rowErrors?.factor ? true : undefined} {...register(`conversions.${i}.factor`, { valueAsNumber: true })} />
+                    </label>
+                    <label>
+                      <span>PRICE (OPTIONAL)</span>
+                      <div className="money-input">
+                        <span>{currency}</span>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          step="0.01"
+                          min="0"
+                          placeholder={autoPrice === null ? "Auto" : formatNumber(autoPrice)}
+                          aria-invalid={rowErrors?.sellingPrice ? true : undefined}
+                          {...register(`conversions.${i}.sellingPrice`, { setValueAs: (v) => (v === "" || v === null || v === undefined ? null : Number(v)) })}
+                        />
+                      </div>
+                    </label>
+                    <label>
+                      <span>BARCODE (OPTIONAL)</span>
+                      <input autoComplete="off" aria-invalid={rowErrors?.barcode ? true : undefined} {...register(`conversions.${i}.barcode`)} />
+                    </label>
+                    <button type="button" className="icon-button danger" aria-label="Remove this pack" onClick={() => dropConversion(i)}>
+                      <Trash2 size={14} />
+                    </button>
+                    {message && <span className="field-error conversion-error">{message}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {errors.conversions?.message && <span className="field-error">{errors.conversions.message}</span>}
+          {packChoices().length === 0 && conversionFields.length === 0 ? (
+            <p className="field-note">No units are marked as packs yet. An admin can mark Box, Carton and others in Settings → Units.</p>
+          ) : (
+            <button
+              type="button"
+              className="button button-ghost unit-packs-add"
+              disabled={conversionFields.length >= 10}
+              onClick={() => addConversion({ uomId: "", factor: Number.NaN, sellingPrice: null, barcode: "" }, { shouldFocus: true })}
+            >
+              <Plus size={13} /> Add a pack
+            </button>
+          )}
+        </div>
+        )}
 
         {fitment && (
           <div className="compatibility">

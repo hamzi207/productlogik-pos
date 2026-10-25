@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "radix-ui";
-import { useForm, useWatch } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Plus, Save, UserPlus, X } from "lucide-react";
-import { createCustomer, updateCustomer } from "@/lib/actions/customers";
+import { createCustomer, getCustomerFormOptions, updateCustomer } from "@/lib/actions/customers";
+import { choosableTypes, defaultType, type CustomerTag, type CustomerTypeOption } from "@/lib/customer-lists";
 import { formatPhone, PHONE_EXAMPLE } from "@/lib/phone";
 import { notify } from "@/lib/notify";
 import { useDiscardGuard } from "@/components/shared/discard-changes";
@@ -13,13 +14,36 @@ import { ModalSheet } from "@/components/shared/modal-sheet";
 import { formatStrn } from "@/lib/tax-id";
 import type { Tables } from "@/lib/types/database.types";
 import {
-  CUSTOMER_TYPES,
   customerSchema,
   type CustomerFormValues,
   type CustomerInput,
-  type CustomerType,
   type TaxRegistrationStatus,
 } from "@/lib/validations/customer.schema";
+import { TagPicker } from "./customer-tags";
+
+type Lists = { types: CustomerTypeOption[]; tags: CustomerTag[] };
+
+// The organization's customer types and tags, kept for the page's lifetime and refreshed on every open,
+// so the dialog can open from anywhere (directory, profile, document builder) without extra props.
+let cachedLists: Lists | null = null;
+
+function useCustomerLists(open: boolean) {
+  const [lists, setLists] = useState<Lists | null>(cachedLists);
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    getCustomerFormOptions()
+      .then((next) => {
+        cachedLists = next;
+        if (live) setLists(next);
+      })
+      .catch(() => live && setLists((l) => l ?? { types: [], tags: [] }));
+    return () => {
+      live = false;
+    };
+  }, [open]);
+  return lists;
+}
 
 type Props = {
   open: boolean;
@@ -31,9 +55,12 @@ type Props = {
   onSaved?: (id: string) => void;
   /** Starting values for a new customer (e.g. a walk-in's name and phone). */
   prefill?: { name?: string; whatsappNumber?: string };
+  /** RF-19.2: the customer's current tags (when editing). */
+  tagIds?: string[];
 };
 
-export function CustomerDialog({ open, onOpenChange, allowInternationalPhones, customer, onSaved, prefill }: Props) {
+export function CustomerDialog({ open, onOpenChange, allowInternationalPhones, customer, onSaved, prefill, tagIds }: Props) {
+  const lists = useCustomerLists(open);
   // Closing with unsaved edits asks first (Cancel, X, Escape, clicking outside).
   const guard = useDiscardGuard({
     onOpenChange,
@@ -43,17 +70,27 @@ export function CustomerDialog({ open, onOpenChange, allowInternationalPhones, c
     <>
       <Dialog.Root open={open} onOpenChange={guard.requestOpenChange}>
         <ModalSheet>
-          <CustomerForm
-            key={customer?.id ?? "new"}
-            customer={customer}
-            prefill={prefill}
-            allowInternationalPhones={allowInternationalPhones}
-            onDirtyChange={guard.setDirty}
-            onDone={(id) => {
-              guard.close();
-              onSaved?.(id);
-            }}
-          />
+          {lists ? (
+            <CustomerForm
+              key={customer?.id ?? "new"}
+              customer={customer}
+              tagIds={tagIds}
+              lists={lists}
+              prefill={prefill}
+              allowInternationalPhones={allowInternationalPhones}
+              onDirtyChange={guard.setDirty}
+              onDone={(id) => {
+                guard.close();
+                onSaved?.(id);
+              }}
+            />
+          ) : (
+            <div className="modal-loading">
+              <Dialog.Title className="sr-only">{customer ? "Edit customer" : "Register customer"}</Dialog.Title>
+              <Dialog.Description className="sr-only">Loading customer types and tags.</Dialog.Description>
+              <Loader2 size={18} className="animate-spin" /> Loading…
+            </div>
+          )}
         </ModalSheet>
       </Dialog.Root>
       {guard.prompt}
@@ -63,12 +100,16 @@ export function CustomerDialog({ open, onOpenChange, allowInternationalPhones, c
 
 function CustomerForm({
   customer,
+  tagIds,
+  lists,
   prefill,
   allowInternationalPhones,
   onDirtyChange,
   onDone,
 }: {
   customer?: Tables<"customers">;
+  tagIds?: string[];
+  lists: Lists;
   prefill?: Props["prefill"];
   allowInternationalPhones: boolean;
   onDirtyChange: (dirty: boolean) => void;
@@ -76,6 +117,10 @@ function CustomerForm({
 }) {
   const isEdit = Boolean(customer);
   const [serverError, setServerError] = useState<string | null>(null);
+  // Types that need a CNIC / NTN; the resolver is rebuilt when the list refreshes (react-hook-form reads it each render).
+  const taxTypes = useMemo(() => new Set(lists.types.filter((t) => t.requires_tax_details).map((t) => t.name)), [lists.types]);
+  const schema = useMemo(() => customerSchema(allowInternationalPhones, (type) => taxTypes.has(type)), [allowInternationalPhones, taxTypes]);
+  const types = choosableTypes(lists.types, customer?.customer_type);
 
   const {
     register,
@@ -84,10 +129,11 @@ function CustomerForm({
     setError,
     formState: { errors, isSubmitting, isDirty },
   } = useForm<CustomerFormValues, unknown, CustomerInput>({
-    resolver: zodResolver(customerSchema(allowInternationalPhones)),
+    resolver: zodResolver(schema),
     defaultValues: {
       name: customer?.name ?? prefill?.name ?? "",
-      customerType: (customer?.customer_type as CustomerType) ?? "Retail Customer",
+      customerType: customer?.customer_type ?? defaultType(lists.types)?.name ?? "",
+      tagIds: tagIds ?? [],
       contactPerson: customer?.contact_person ?? "",
       // Shown the way people type them (0300-1234567), stored as E.164.
       whatsappNumber: customer ? formatPhone(customer.whatsapp_number) : (prefill?.whatsappNumber ?? ""),
@@ -106,7 +152,7 @@ function CustomerForm({
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
 
   const [customerType, registration] = useWatch({ control, name: ["customerType", "taxRegistrationStatus"] });
-  const needsTaxId = customerType !== "Retail Customer" || registration === "registered";
+  const needsTaxId = taxTypes.has(customerType) || registration === "registered";
 
   const onSubmit = handleSubmit(async (values) => {
     setServerError(null);
@@ -150,7 +196,7 @@ function CustomerForm({
               <h2>{isEdit ? "Edit customer" : "Register customer"}</h2>
             </Dialog.Title>
             <Dialog.Description asChild>
-              <p>{isEdit ? "Update contact and billing details." : "Add a dealership, fleet account or retail client."}</p>
+              <p>{isEdit ? "Update contact and billing details." : "Add a customer to your directory."}</p>
             </Dialog.Description>
           </div>
         </div>
@@ -170,7 +216,8 @@ function CustomerForm({
           <label>
             <span>CUSTOMER TYPE</span>
             <select {...invalid("customerType")} {...register("customerType")}>
-              {CUSTOMER_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              {types.length === 0 && <option value="">No customer types yet</option>}
+              {types.map((t) => <option key={t.id} value={t.name}>{t.name}{t.is_archived ? " (archived)" : ""}</option>)}
             </select>
             {fieldError("customerType")}
           </label>
@@ -249,6 +296,19 @@ function CustomerForm({
             <textarea rows={2} placeholder="Street, area, city" {...invalid("billingAddress")} {...register("billingAddress")} />
             {fieldError("billingAddress")}
           </label>
+          <div className="span-two form-field">
+            <span className="field-label" id="c-tags-label">TAGS (OPTIONAL)</span>
+            {lists.tags.length === 0 ? (
+              <span className="field-note">No tags yet. Organization admins create them in Settings → Customers.</span>
+            ) : (
+              <Controller
+                control={control}
+                name="tagIds"
+                render={({ field }) => <TagPicker id="c-tags-label" tags={lists.tags} value={field.value} onChange={field.onChange} />}
+              />
+            )}
+            {errors.tagIds?.message && <span className="field-error">{errors.tagIds.message}</span>}
+          </div>
           <label className="span-two">
             <span>NOTES (OPTIONAL)</span>
             <textarea rows={2} placeholder="Payment terms, preferred contact time, what they usually buy…" {...invalid("notes")} {...register("notes")} />

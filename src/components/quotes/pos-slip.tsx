@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { formatMoney } from "@/lib/format";
 import { notify } from "@/lib/notify";
 import type { PrintableDocument } from "@/lib/printable";
+import { formatQty } from "@/lib/uom";
 import { qrPath } from "@/lib/qr";
 
 type SlipData = { doc: PrintableDocument; shareUrl: string | null };
@@ -99,7 +100,7 @@ function PosSlip({ doc, shareUrl, rootRef }: SlipData & { rootRef: RefObject<HTM
             <strong>{l.description}</strong>
             <div className="pos-slip-row">
               <span>
-                {l.quantity} × {money(l.salePrice)}
+                {formatQty(l.quantity, l.unit)} × {money(l.salePrice)}
                 {l.discount > 0 ? `  (−${money(l.discount)} ea)` : ""}
               </span>
               <strong>{money(l.total)}</strong>

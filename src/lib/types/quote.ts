@@ -1,4 +1,5 @@
 import type { Tables } from "./database.types";
+import type { UnitOption } from "@/lib/uom";
 
 /** A customer as the quote builder's picker shows it. */
 export type CustomerOption = Pick<
@@ -35,11 +36,13 @@ export type DocumentListItem = Pick<
   customer: Pick<Tables<"customers">, "id" | "name" | "customer_type" | "is_walk_in"> | null;
 };
 
-/** A saved line, plus what the builder needs to show it (SKU, stock it may use). */
+/** A saved line, plus what the builder needs to show it (SKU, stock it may use, units it can switch to). */
 export type QuoteDocumentLine = Tables<"quote_items"> & {
   sku: string | null;
-  /** Units this line could use: available stock plus what the line already holds. */
+  /** Base units this line could use: available stock plus what the line already holds. */
   available: number | null;
+  /** The product's units (base first); empty for custom lines and removed products. */
+  units: UnitOption[];
 };
 
 /** One document with its customer, lines and payments, for the builder. */
@@ -61,7 +64,14 @@ export type PickerItem = Pick<
   | "reserved_quantity"
   | "low_stock_threshold"
   | "price_includes_tax"
-> & { category: { name: string } | null };
+  | "sale_uom_id"
+> & {
+  category: { name: string } | null;
+  /** Units it can go on a document in, base unit first (Phase 19). */
+  units: UnitOption[];
+  /** Found by scanning this pack's barcode: the line starts in that unit. */
+  scan_uom_id?: string | null;
+};
 
 /** GET /api/quote-items */
 export type PickerItemsResponse = { items: PickerItem[] };

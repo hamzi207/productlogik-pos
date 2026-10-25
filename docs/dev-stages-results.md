@@ -847,3 +847,42 @@ Test steps:
   5. Console → Attributes: add a list attribute to a category → it appears in that category's product
      dialog, the inventory filters and Export CSV.
   6. Commit: git add . && git commit -m "Phase 18 - industries, category catalogs, attributes and onboarding"
+
+Phase 19 (Version 2: units of measure, decimal quantities, customer types and tags), 2026-10-25:
+  - Units of measure per organization (seeded from its industry), each with 0-3 decimal places. Every
+    product has a base unit; quantities are decimals (1.250 kg, 2.5 m) everywhere, with the unit printed.
+  - Packs: a product can also be sold as a box / carton etc. (holds N base units, own price, own barcode).
+    Document lines pick the unit; stock converts (1 box = 12 pcs). Scanning a pack barcode starts a line in it.
+  - RF-19.1: purchase and sale units per product; new lines start in the sale unit. CSV has Unit, Other
+    Units, Purchase Unit and Sale Unit columns.
+  - Customer types are each organization's own list (default, "needs tax details" flag, archive); renames
+    follow to customers; flagged types need a CNIC or NTN.
+  - RF-19.2: coloured customer tags. Staff assign them in the customer dialog; chips on the list and profile;
+    ?tag= filter; Export CSV on Customers; Reports tag filter.
+  - Packs are switched on in Settings → Units ("Sell and buy in packs", off by default; adds Box, Carton,
+    Pack and Dozen; saved from the Save Settings bar) and only units marked "Can be a pack" can be packs.
+  - Measuring units: presets for mm, cm, in, ft, rft, m, sqft, sqm, sqyd, cbm, cft, kg, ton, lb, l, gal, roll
+    and sheet; Add unit has a "Common unit" pick; measuring industries seed more of them. The product dialog's Sell in / Buy in
+    pickers offer pcs, box, pair…; picking a new pack adds its row. Purchase orders stay in Phase 25 (plan Rev 9).
+  - Settings → Units and Settings → Customers tabs (admins edit, staff read); console organization tab
+    "Units & customers" with the same cards (audited).
+  - Not built: purchase units on purchase orders (Phase 25); tags on statements / price lists (Phases 30, 26);
+    packs in the console Products tab.
+Typecheck, lint and production build pass. Rolled-back SQL tests for stock in packs, decimals, types, tags,
+defaults, deletes and the tag report filter all pass; the V1 quote total is unchanged.
+
+Test steps:
+  1. Settings → Units: switch on "Sell and buy in packs". The Save Settings bar appears (Discard puts it
+     back; clicking another tab asks first). Save: Box, Carton, Pack and Dozen appear, marked Pack.
+  1b. + Unit → Common unit: pick Inch (in); code, name and decimals fill in. Save. Inch drops out of the pick.
+  2. Inventory → edit a product → Packs & selling units → Sell in: Box (new pack) → holds 12, barcode 1234.
+     Buy in: Carton → holds 144. Save.
+  3. New invoice: the product's line starts as 1 box at 12 × the price; switch it to pcs. Type 1234 in the
+     search: it adds a box line. Save: stock drops by 12 per box.
+  4. Settings → Customers: add a tag "Monthly billing" (blue), add a type with "Needs tax details".
+  5. Customers → edit Hamza Traders → give it the tag and the new type (it asks for a CNIC/NTN). The chip
+     shows on the list and profile; the tag filter and Export CSV include it; Reports → tag select.
+  6. Console → Organizations → your shop → Units & customers: the same lists and the packs switch.
+  6b. Switch packs off (a note explains packs are kept), then Save Settings: the product dialog has no
+      Packs section and new lines use pcs.
+  7. Commit: git add . && git commit -m "Phase 19 - units of measure, decimal quantities, customer types and tags"

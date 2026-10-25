@@ -2,6 +2,7 @@ import { Document, Page, Path, StyleSheet, Svg, Text, View } from "@react-pdf/re
 import { formatMoney } from "@/lib/format";
 import { FONT, FONT_BOLD } from "./fonts";
 import type { PrintableDocument } from "@/lib/printable";
+import { formatQty } from "@/lib/uom";
 import { qrPath } from "@/lib/qr";
 
 // 80mm POS slip (PROJECT_SPEC Phase 11) for roll printers (Epson TM, Xprinter, Sunmi):
@@ -102,7 +103,7 @@ export function ThermalReceipt({ doc, shareUrl }: Props) {
             {l.details && <Text style={[s.muted, { fontSize: 7.5 }]}>{l.details}</Text>}
             <View style={s.itemSub}>
               <Text style={s.muted}>
-                {l.quantity} × {money(l.salePrice)}
+                {formatQty(l.quantity, l.unit)} × {money(l.salePrice)}
                 {l.discount > 0 ? `  (−${money(l.discount)} ea)` : ""}
               </Text>
               <Text style={s.bold}>{money(l.total)}</Text>

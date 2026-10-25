@@ -1,5 +1,6 @@
 import { getShopSession } from "@/lib/auth";
 import { formatMoney } from "@/lib/format";
+import { formatQty } from "@/lib/uom";
 import { createClient } from "@/lib/supabase/server";
 
 export type AlertTone = "red" | "amber" | "blue";
@@ -8,7 +9,7 @@ export type ShopAlert = { key: string; tone: AlertTone; title: string; detail: s
 export type AlertsResponse = { alerts: ShopAlert[] };
 
 type Doc = { id: string; number: string; customer: string; days: number; balance?: number; total?: number };
-type Stock = { id: string; name: string; sku: string; free: number; threshold: number };
+type Stock = { id: string; name: string; sku: string; free: number; threshold: number; unit: string | null };
 type Raw = { lowStock: Stock[]; overdue: Doc[]; dueSoon: Doc[]; expiring: Doc[]; expired: Doc[] };
 
 const days = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
@@ -65,7 +66,7 @@ export async function GET() {
       key: `stock:${s.id}:${s.free <= 0 ? "out" : "low"}`,
       tone: s.free <= 0 ? ("red" as const) : ("amber" as const),
       title: s.free <= 0 ? `${s.name} is out of stock` : `${s.name} is running low`,
-      detail: `${s.sku} · ${s.free <= 0 ? "none available" : `${s.free} available`} (low-stock level ${s.threshold})`,
+      detail: `${s.sku} · ${s.free <= 0 ? "none available" : `${formatQty(s.free, s.unit)} available`} (low-stock level ${formatQty(s.threshold, s.unit)})`,
       href: `/inventory?q=${encodeURIComponent(s.sku)}`,
     })),
     ...r.dueSoon.map((d) => ({

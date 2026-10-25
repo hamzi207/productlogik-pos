@@ -6,6 +6,7 @@ import { formatMoney, type MoneyFormat } from "@/lib/format";
 import { notify } from "@/lib/notify";
 import { lineAmounts, round2, unitDiscount, type DiscountType } from "@/lib/quote-math";
 import type { PickerItem } from "@/lib/types/quote";
+import { fitsDecimals, formatQty, stepFor, type UnitOption } from "@/lib/uom";
 import { LineSearch, type CategoryChip } from "./line-search";
 import { MobileSheet } from "./mobile-sheet";
 
@@ -25,8 +26,17 @@ export type BuilderLine = {
   /** Per unit: % of the unit price or a flat amount. */
   discountType: DiscountType;
   discountValue: number;
-  /** Units this part line can use: available stock (+ what a saved line already holds). Null for custom items. */
+  /** Base units this part line can use: available stock (+ what a saved line already holds). Null for custom items. */
   stock: number | null;
+  /** Parts: the unit the line is sold in (base unit or a pack, Phase 19). Null for custom items. */
+  uomId: string | null;
+  uomLabel: string | null;
+  /** Base units in one of this line's unit. */
+  uomFactor: number;
+  /** Decimal places the quantity may have in this unit. */
+  uomDecimals: number;
+  /** Units a part line can switch to (base first); empty for custom items. */
+  units: UnitOption[];
 };
 
 type Props = {
@@ -44,11 +54,57 @@ type Props = {
 
 const numberValue = (n: number) => (Number.isFinite(n) ? n : "");
 
-/** Quantity after a +/− tap: parts count whole units; custom items keep their fraction. */
+/** Quantity after a +/− tap: parts in whole-number units drop any fraction; custom items and kg / litres keep it. */
 function stepQuantity(line: BuilderLine, by: 1 | -1) {
   const qty = Number.isFinite(line.quantity) ? line.quantity : 0;
-  const base = line.itemId === null ? qty : Math.floor(qty);
-  return Math.max(1, base + by);
+  const base = line.itemId === null || line.uomDecimals > 0 ? qty : Math.floor(qty);
+  return Math.max(1, Math.round((base + by) * 1000) / 1000);
+}
+
+/** Switching a part to another unit: its price, and a quantity that fits the unit's decimals. A flat discount resets. */
+function unitPatch(line: BuilderLine, id: string): Partial<BuilderLine> {
+  const unit = line.units.find((u) => u.id === id);
+  if (!unit) return {};
+  const qty = Number.isFinite(line.quantity) ? line.quantity : 1;
+  return {
+    uomId: unit.id,
+    uomLabel: unit.code,
+    uomFactor: unit.factor,
+    uomDecimals: unit.decimals,
+    unitPrice: unit.price,
+    quantity: fitsDecimals(qty, unit.decimals) ? qty : Math.max(1, Math.round(qty)),
+    ...(line.discountType === "amount" ? { discountValue: 0 } : {}),
+  };
+}
+
+/** Over the stock it can use? Stock is in base units; the line may be in packs. */
+const isShort = (line: BuilderLine) => line.itemId !== null && line.stock !== null && line.quantity * line.uomFactor > line.stock + 1e-9;
+
+/** "Only 4 pcs available" / "None available". */
+const shortLabel = (line: BuilderLine) =>
+  line.stock! <= 0 ? "None available" : `Only ${formatQty(line.stock!, line.units[0]?.code)} available`;
+
+/** The unit picker for a part line (a label when it has only one unit). */
+function UnitControl({ line, readOnly, onChange, className = "line-unit-select" }: { line: BuilderLine; readOnly: boolean; onChange: (patch: Partial<BuilderLine>) => void; className?: string }) {
+  if (line.itemId === null) return null;
+  const known = line.units.some((u) => u.id === line.uomId);
+  if (line.units.length <= 1 && known) return line.uomLabel ? <span className="line-unit-label">{line.uomLabel}</span> : null;
+  return (
+    <select
+      className={className}
+      value={line.uomId ?? ""}
+      disabled={readOnly}
+      onChange={(e) => onChange(unitPatch(line, e.target.value))}
+      aria-label="Unit"
+      aria-invalid={!known || undefined}
+    >
+      {/* A unit removed from the product since: still shown, but it has to change before saving. */}
+      {!known && <option value={line.uomId ?? ""}>{line.uomLabel ?? "unit"} (removed)</option>}
+      {line.units.map((u) => (
+        <option key={u.id} value={u.id}>{u.factor === 1 ? u.code : `${u.code} (${formatQty(u.factor, line.units[0]?.code)})`}</option>
+      ))}
+    </select>
+  );
 }
 
 /** A typed sale price always becomes a flat discount. */
@@ -118,7 +174,7 @@ export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly
             const custom = line.itemId === null;
             const amounts = lineAmounts(line);
             const sale = salePrice(line);
-            const short = !custom && line.stock !== null && line.quantity > line.stock;
+            const short = isShort(line);
             return (
               <div className="doc-row" role="row" key={line.key}>
                 <span className="doc-index">
@@ -153,9 +209,7 @@ export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly
                     <>
                       <strong className="product-title" title={line.description}>{line.description}</strong>
                       <span className="mono">{line.sku ?? "Removed from inventory"}</span>
-                      {short && (
-                        <span className="stock-low">{line.stock! <= 0 ? "None available" : `Only ${line.stock} available`}</span>
-                      )}
+                      {short && <span className="stock-low">{shortLabel(line)}</span>}
                     </>
                   )}
                 </div>
@@ -173,33 +227,36 @@ export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly
                     readOnly={readOnly}
                   />
                 ) : (
-                  <div className="stepper">
-                    <button
-                      type="button"
-                      aria-label="Decrease quantity"
-                      disabled={readOnly || line.quantity <= 1}
-                      onClick={() => update(line.key, { quantity: stepQuantity(line, -1) })}
-                    >
-                      <Minus size={11} />
-                    </button>
-                    <input
-                      type="number"
-                      inputMode="numeric"
-                      min="1"
-                      step="1"
-                      value={numberValue(line.quantity)}
-                      onChange={(e) => update(line.key, { quantity: e.target.valueAsNumber })}
-                      aria-label="Quantity"
-                      readOnly={readOnly}
-                    />
-                    <button
-                      type="button"
-                      aria-label="Increase quantity"
-                      disabled={readOnly}
-                      onClick={() => update(line.key, { quantity: stepQuantity(line, 1) })}
-                    >
-                      <Plus size={11} />
-                    </button>
+                  <div className="line-qty">
+                    <div className="stepper">
+                      <button
+                        type="button"
+                        aria-label="Decrease quantity"
+                        disabled={readOnly || line.quantity <= 1}
+                        onClick={() => update(line.key, { quantity: stepQuantity(line, -1) })}
+                      >
+                        <Minus size={11} />
+                      </button>
+                      <input
+                        type="number"
+                        inputMode={line.uomDecimals > 0 ? "decimal" : "numeric"}
+                        min={stepFor(line.uomDecimals)}
+                        step={stepFor(line.uomDecimals)}
+                        value={numberValue(line.quantity)}
+                        onChange={(e) => update(line.key, { quantity: e.target.valueAsNumber })}
+                        aria-label="Quantity"
+                        readOnly={readOnly}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Increase quantity"
+                        disabled={readOnly}
+                        onClick={() => update(line.key, { quantity: stepQuantity(line, 1) })}
+                      >
+                        <Plus size={11} />
+                      </button>
+                    </div>
+                    <UnitControl line={line} readOnly={readOnly} onChange={(patch) => update(line.key, patch)} />
                   </div>
                 )}
 
@@ -216,7 +273,10 @@ export function LineItems({ lines, onChange, onAdd, onAddCustom, money, readOnly
                     readOnly={readOnly}
                   />
                 ) : (
-                  <span className="line-unit" title="Price from inventory">{formatMoney(line.unitPrice, money)}</span>
+                  <span className="line-unit" title="Price from inventory">
+                    {formatMoney(line.unitPrice, money)}
+                    {line.uomLabel && line.units.length > 1 && <small className="line-per-unit">per {line.uomLabel}</small>}
+                  </span>
                 )}
 
                 <div className={`line-discount${amounts.invalid ? " invalid" : ""}`}>
@@ -325,7 +385,7 @@ function MobileLineCard({
 }) {
   const custom = line.itemId === null;
   const amounts = lineAmounts(line);
-  const short = !custom && line.stock !== null && line.quantity > line.stock;
+  const short = isShort(line);
   const discount = discountLabel(line, money);
   const details = (
     <>
@@ -340,7 +400,7 @@ function MobileLineCard({
           {discount && <span className="discount-amount"> {discount}</span>}
         </span>
         {amounts.invalid && <span className="stock-out">Discount too large</span>}
-        {short && <span className="stock-low">{line.stock! <= 0 ? "None available" : `Only ${line.stock} available`}</span>}
+        {short && <span className="stock-low">{shortLabel(line)}</span>}
       </span>
     </>
   );
@@ -359,7 +419,7 @@ function MobileLineCard({
           <button type="button" aria-label="Decrease quantity" disabled={readOnly || line.quantity <= 1} onClick={() => onStep(-1)}>
             <Minus size={18} />
           </button>
-          <span aria-live="polite">{Number.isFinite(line.quantity) ? line.quantity : "—"}</span>
+          <span aria-live="polite">{Number.isFinite(line.quantity) ? formatQty(line.quantity, custom ? null : line.uomLabel) : "—"}</span>
           <button type="button" aria-label="Increase quantity" disabled={readOnly} onClick={() => onStep(1)}>
             <Plus size={18} />
           </button>
@@ -433,9 +493,9 @@ function LineEditSheet({
             </button>
             <input
               type="number"
-              inputMode={custom ? "decimal" : "numeric"}
-              min={custom ? "0.01" : "1"}
-              step={custom ? "any" : "1"}
+              inputMode={custom || line.uomDecimals > 0 ? "decimal" : "numeric"}
+              min={custom ? "0.01" : stepFor(line.uomDecimals)}
+              step={custom ? "any" : stepFor(line.uomDecimals)}
               value={numberValue(line.quantity)}
               onChange={(e) => onUpdate({ quantity: e.target.valueAsNumber })}
               aria-label="Quantity"
@@ -446,8 +506,15 @@ function LineEditSheet({
           </div>
         </div>
 
+        {!custom && (line.units.length > 1 || !line.units.some((u) => u.id === line.uomId)) && (
+          <label className="line-edit-row">
+            <span className="field-label">UNIT</span>
+            <UnitControl line={line} readOnly={false} onChange={onUpdate} className="field-input" />
+          </label>
+        )}
+
         <label className="line-edit-row">
-          <span className="field-label">UNIT PRICE</span>
+          <span className="field-label">{!custom && line.uomLabel ? `PRICE PER ${line.uomLabel.toUpperCase()}` : "UNIT PRICE"}</span>
           {custom ? (
             <input
               className="field-input number"

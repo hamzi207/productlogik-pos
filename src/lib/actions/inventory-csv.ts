@@ -13,7 +13,9 @@ import {
   IMPORT_BATCH,
   MAX_IMPORT_ROWS,
   normalizeCategoryPath,
+  formatUnitsCell,
   parseNumberCell,
+  parseUnitsCell,
   parseVehiclesCell,
   parseYesNo,
   templateRows,
@@ -21,6 +23,7 @@ import {
   type CsvItemRow,
 } from "@/lib/inventory-csv";
 import { hasModule } from "@/lib/module-data";
+import { getUnits } from "@/lib/uom-data";
 import { createClient } from "@/lib/supabase/server";
 import { planLimitMessage } from "@/lib/plan-limits";
 import type { Json } from "@/lib/types/database.types";
@@ -60,10 +63,15 @@ type Existing = {
   is_universal: boolean;
   price_includes_tax: boolean;
   attributes: Json;
+  base_uom_id: string;
+  purchase_uom_id: string | null;
+  sale_uom_id: string | null;
+  item_uom_conversions: { uom_id: string; factor: number; selling_price: number | null; barcode: string | null; sort_order: number }[];
   item_vehicle_compatibility: { vehicle_id: number }[];
 };
 
-const ITEM_COLUMNS = "id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, is_universal, price_includes_tax, attributes";
+const ITEM_COLUMNS =
+  "id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, is_universal, price_includes_tax, attributes, base_uom_id, purchase_uom_id, sale_uom_id, item_uom_conversions(uom_id, factor, selling_price, barcode, sort_order)";
 
 const chunks = <T,>(list: T[], size: number) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
 
@@ -122,13 +130,17 @@ function attributeCell(a: Attribute, raw: string): { value: AttrValues[string] }
 /** Validates every row against the shop (categories, SKUs, vehicles, attributes) and builds what would be saved. */
 async function prepare(rows: CsvItemRow[], updateExisting: boolean): Promise<Prepared[]> {
   const supabase = await createClient();
-  const [{ tenant }, categories, attributes, fitment] = await Promise.all([
+  const [{ tenant }, categories, attributes, fitment, units] = await Promise.all([
     getShopSession(),
     getCategories(),
     getAttributes(),
     hasModule("vehicle_fitment"),
+    getUnits(),
   ]);
   const index = buildCategoryIndex(categories);
+  const unitByCode = new Map(units.map((u) => [u.code.toLowerCase(), u]));
+  const unitCodes = units.filter((u) => !u.is_archived).map((u) => u.code).join(", ");
+  const defaultUnit = unitByCode.get("pcs") ?? units.find((u) => !u.is_archived);
   const byPath = new Map(index.flat.map((n) => [normalizeCategoryPath(fullPath(n)), n.id]));
   // A category's own name works too when only one category has it ("PPF").
   const byName = new Map<string, string | null>();
@@ -250,6 +262,38 @@ async function prepare(rows: CsvItemRow[], updateExisting: boolean): Promise<Pre
       }
     }
 
+    // Units (Phase 19): blank keeps the current ones on updates; new items start in pieces with no packs.
+    const unitCell = (k: CsvColumnKey, raw: string, keep?: string) => {
+      const u = unitByCode.get(raw.trim().toLowerCase());
+      if (!u) err(k, `"${raw}" isn't one of your units (${unitCodes}). Add it in Settings → Units.`);
+      else if (u.is_archived && u.id !== keep) err(k, `${u.code} is archived. Choose another unit.`);
+      return u?.id;
+    };
+    const baseUomId = has("unit") ? (unitCell("unit", c.unit!, current?.base_uom_id) ?? "") : current && update ? current.base_uom_id : (defaultUnit?.id ?? "");
+    const currentConversions = current ? [...current.item_uom_conversions].sort((a, b) => a.sort_order - b.sort_order) : [];
+    let conversions = current && update
+      ? currentConversions.map((cv) => ({ uomId: cv.uom_id, factor: Number(cv.factor), sellingPrice: cv.selling_price === null ? null : Number(cv.selling_price), barcode: cv.barcode ?? "" }))
+      : [];
+    if (has("conversions")) {
+      const cleared = ["none", "-"].includes(c.conversions!.trim().toLowerCase());
+      const { specs, invalid } = cleared ? { specs: [], invalid: [] } : parseUnitsCell(c.conversions);
+      for (const t of invalid) err("conversions", `Can't read "${t}". Write each unit as code=how many base units, with an optional @price: box=12@1500.`);
+      conversions = specs.flatMap((sp) => {
+        const id = unitCell("conversions", sp.code, currentConversions.find((cv) => unitByCode.get(sp.code)?.id === cv.uom_id)?.uom_id);
+        if (!id) return [];
+        // A unit that stays keeps its barcode (barcodes aren't in the file).
+        const barcode = currentConversions.find((cv) => cv.uom_id === id)?.barcode ?? "";
+        return [{ uomId: id, factor: sp.factor, sellingPrice: sp.price, barcode }];
+      });
+    }
+    const pickUnit = (k: "purchaseUnit" | "saleUnit", currentValue: string | null | undefined) => {
+      if (!has(k)) return current && update ? (currentValue ?? null) : null;
+      const id = unitCell(k, c[k]!, currentValue ?? undefined);
+      return id && id !== baseUomId ? id : null;
+    };
+    const purchaseUomId = pickUnit("purchaseUnit", current?.purchase_uom_id);
+    const saleUomId = pickUnit("saleUnit", current?.sale_uom_id);
+
     const text = (k: CsvColumnKey, existingValue: string | null | undefined) => (c[k] !== undefined && (c[k] !== "" || !update) ? c[k]! : (existingValue ?? ""));
     const candidate = {
       sku,
@@ -265,6 +309,10 @@ async function prepare(rows: CsvItemRow[], updateExisting: boolean): Promise<Pre
       isUniversal,
       vehicleIds: isUniversal ? [] : vehicles,
       attributes: values,
+      baseUomId,
+      conversions,
+      purchaseUomId,
+      saleUomId,
     };
 
     let input: InventoryItemInput | undefined;
@@ -275,6 +323,7 @@ async function prepare(rows: CsvItemRow[], updateExisting: boolean): Promise<Pre
         const column: Partial<Record<string, CsvColumnKey>> = {
           sku: "sku", name: "name", description: "description", vendorName: "vendor", categoryId: "category",
           costPrice: "costPrice", sellingPrice: "sellingPrice", quantityOnHand: "stock", lowStockThreshold: "lowStock", vehicleIds: "vehicles",
+          baseUomId: "unit", conversions: "conversions", purchaseUomId: "purchaseUnit", saleUomId: "saleUnit",
         };
         for (const issue of parsed.error.issues) {
           const key = column[String(issue.path[0])];
@@ -339,11 +388,18 @@ export async function importInventoryCsv(rows: CsvItemRow[], updateExisting: boo
       p_vendor_name: item.vendorName || undefined,
       p_vehicle_ids: item.isUniversal ? [] : item.vehicleIds,
       p_attributes: item.attributes,
+      p_base_uom_id: item.baseUomId,
+      p_purchase_uom_id: item.purchaseUomId ?? undefined,
+      p_sale_uom_id: item.saleUomId ?? undefined,
+      p_conversions: item.conversions.map((cv) => ({ uom_id: cv.uomId, factor: cv.factor, selling_price: cv.sellingPrice, barcode: cv.barcode || null })),
     });
     if (error) {
       const limit = planLimitMessage(error);
       // Category, attribute and fitment checks in the database explain themselves.
-      const explained = ["22023", "23502"].includes(error.code) || (error.code === "23503" && error.message.includes("category"));
+      const explained =
+        ["22023", "23502"].includes(error.code) ||
+        (error.code === "23503" && error.message.includes("category")) ||
+        (error.code === "23514" && (error.message.includes("unit") || error.message.includes("pack")));
       const message = limit
         ? limit
         : error.code === "23505"
@@ -367,9 +423,10 @@ const columnAttributes = (attributes: Attribute[]) => attributes.filter((a) => !
 /** "Export Inventory (CSV)": every item in the shop (all pages), in the import template's columns. */
 export async function exportInventoryCsv(): Promise<{ status: "success"; header: string[]; rows: (string | number)[][] } | { status: "error"; message: string }> {
   const supabase = await createClient();
-  const [categories, attributeDefs, fitment] = await Promise.all([getCategories(), getAttributes(), hasModule("vehicle_fitment")]);
+  const [categories, attributeDefs, fitment, units] = await Promise.all([getCategories(), getAttributes(), hasModule("vehicle_fitment"), getUnits()]);
   const index = buildCategoryIndex(categories);
   const attrs = columnAttributes(attributeDefs);
+  const codeOf = new Map(units.map((u) => [u.id, u.code]));
   type Row = Omit<Existing, "item_vehicle_compatibility"> & { item_vehicle_compatibility: { vehicles: { year: number; make: string; model: string } | null }[] };
   const all: Row[] = [];
   // PostgREST returns at most 1000 rows per request: page through everything.
@@ -401,13 +458,21 @@ export async function exportInventoryCsv(): Promise<{ status: "success"; header:
         category: node ? fullPath(node) : "",
         costPrice: Number(i.cost_price),
         sellingPrice: Number(i.selling_price),
-        stock: i.quantity_on_hand,
+        stock: Number(i.quantity_on_hand),
         universal: yes(i.is_universal),
         vehicles: i.is_universal ? "" : formatVehiclesCell(i.item_vehicle_compatibility.flatMap((l) => (l.vehicles ? [l.vehicles] : []))),
         vendor: i.vendor_name ?? "",
-        lowStock: i.low_stock_threshold,
+        lowStock: Number(i.low_stock_threshold),
         priceIncludesTax: yes(i.price_includes_tax),
         description: i.description ?? "",
+        unit: codeOf.get(i.base_uom_id) ?? "",
+        conversions: formatUnitsCell(
+          [...i.item_uom_conversions]
+            .sort((a, b) => a.sort_order - b.sort_order)
+            .map((cv) => ({ code: codeOf.get(cv.uom_id) ?? "", factor: Number(cv.factor), price: cv.selling_price === null ? null : Number(cv.selling_price) })),
+        ),
+        purchaseUnit: i.purchase_uom_id ? (codeOf.get(i.purchase_uom_id) ?? "") : "",
+        saleUnit: i.sale_uom_id ? (codeOf.get(i.sale_uom_id) ?? "") : "",
       };
       const values = asValues(i.attributes);
       return [

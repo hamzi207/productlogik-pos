@@ -8,6 +8,7 @@ import { buildCategoryIndex, CATEGORY_COLUMNS } from "@/lib/categories";
 import { formatDate, type MoneyFormat } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { formatStrn } from "@/lib/tax-id";
+import { formatNumber } from "@/lib/uom";
 import { formatIban, formatWalletNumber, parseWallets } from "@/lib/validations/document-settings.schema";
 
 // Everything a quotation / invoice needs to be printed or shown to the customer.
@@ -20,6 +21,8 @@ export type PrintableLine = {
   details: string | null;
   sku: string | null;
   quantity: number;
+  /** The line's unit ("kg", "box"); null for custom items (Phase 19). */
+  unit: string | null;
   unitPrice: number;
   /** Per-unit discount (money). */
   discount: number;
@@ -137,8 +140,9 @@ export async function loadPrintable(
     details: details[i],
     sku: l.inventory_items?.sku ?? null,
     quantity: Number(l.quantity),
+    unit: l.item_id ? l.uom_label : null,
     unitPrice: Number(l.unit_price),
-    discount: Number(l.discount_amount) / Math.max(Number(l.quantity), 1),
+    discount: Number(l.quantity) > 0 ? Number(l.discount_amount) / Number(l.quantity) : 0,
     salePrice: Number(l.sale_price),
     total: Number(l.total_price),
   }));
@@ -150,7 +154,7 @@ export async function loadPrintable(
         amount: Number(p.amount),
         notes: p.notes,
         forItems: p.invoice_payment_items.length
-          ? p.invoice_payment_items.map((a) => (a.quantity ? `${a.description} ×${Number(a.quantity)}` : a.description)).join(", ")
+          ? p.invoice_payment_items.map((a) => (a.quantity ? `${a.description} ×${formatNumber(Number(a.quantity))}` : a.description)).join(", ")
           : null,
       }))
     : [];

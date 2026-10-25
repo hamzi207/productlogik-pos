@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { PAYMENT_METHODS } from "@/lib/documents";
+import { fitsDecimals } from "@/lib/uom";
 
 export const DISCOUNT_TYPES = ["amount", "percent"] as const;
 export const DOCUMENT_STAGES = ["draft", "quotation", "invoice"] as const;
@@ -14,16 +15,21 @@ const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid date.");
 export const quoteLineSchema = z
   .object({
     itemId: z.uuid().nullable(),
+    /** Inventory parts: the unit it's sold in (base unit or a conversion); null = base unit. The database checks the decimals. */
+    uomId: z.uuid().nullable().optional(),
     description: z.string().trim().min(1, "Every line needs a description.").max(300, "Keep descriptions under 300 characters."),
     isLabor: z.boolean(),
-    quantity: z.number({ error: "Enter a quantity." }).positive("Quantities must be more than 0.").max(100_000, "That quantity is too large."),
+    quantity: z
+      .number({ error: "Enter a quantity." })
+      .positive("Quantities must be more than 0.")
+      .max(100_000, "That quantity is too large.")
+      .refine((n) => fitsDecimals(n, 3), "Use at most 3 decimal places."),
     unitPrice: z.number({ error: "Enter a price." }).min(0, "Prices can't be negative.").max(100_000_000, "That price is too large."),
     discountType: z.enum(DISCOUNT_TYPES),
     discountValue: z
       .number({ error: "Enter a discount (0 for none)." })
       .min(0, "A sale price can't be more than the unit price."),
   })
-  .refine((l) => l.itemId === null || Number.isInteger(l.quantity), "Products are sold in whole units.")
   .refine((l) => l.discountType !== "percent" || l.discountValue <= 100, "A discount can't be more than 100%.")
   .refine((l) => l.discountType !== "amount" || l.discountValue <= l.unitPrice, "A discount can't be more than the unit price.");
 

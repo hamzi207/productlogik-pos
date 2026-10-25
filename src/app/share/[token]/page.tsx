@@ -5,6 +5,7 @@ import { Download, FileText, Landmark } from "lucide-react";
 import { CopyButton } from "@/components/share/copy-button";
 import { formatMoney } from "@/lib/format";
 import { loadPrintable } from "@/lib/printable";
+import { formatQty } from "@/lib/uom";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 // The customer's view-only page behind a share link (sent over WhatsApp). No sign-in.
@@ -65,7 +66,7 @@ async function SharedDocument({ params }: { params: Params }) {
               <strong>{l.description}</strong>
               {l.details && <span>{l.details}</span>}
               <span>
-                {l.quantity} × {money(l.salePrice)}
+                {formatQty(l.quantity, l.unit)} × {money(l.salePrice)}
                 {l.discount > 0 && <s>{money(l.unitPrice)}</s>}
               </span>
             </div>

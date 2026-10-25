@@ -4,11 +4,13 @@ import { redirect } from "next/navigation";
 import { BarChart3, Plus, Receipt, Users } from "lucide-react";
 import { getCustomers, getCustomerStats, type CustomerStats as Stats } from "@/lib/actions/customers";
 import { getShopSession } from "@/lib/auth";
+import { getCustomerTags, getCustomerTypes } from "@/lib/customer-list-data";
 import { formatMoney } from "@/lib/format";
 import { parsePagination, pastEndRedirect } from "@/lib/pagination";
 import { customerFiltersSchema } from "@/lib/validations/customer.schema";
 import { CustomerFilters } from "@/components/customers/customer-filters";
 import { AddCustomerButton, CustomerTable } from "@/components/customers/customer-table";
+import { ExportCustomersButton } from "@/components/customers/export-customers-button";
 
 export const metadata: Metadata = { title: "Customers" };
 
@@ -31,7 +33,7 @@ function CustomerStats({ stats, money }: { stats: Stats; money: Parameters<typeo
       </div>
       <div>
         <span className="customer-stat-icon green"><BarChart3 size={18} /></span>
-        <div><strong>{b2b}</strong><span>B2B accounts (dealership + fleet)</span></div>
+        <div><strong>{b2b}</strong><span>Business accounts (types that need tax details)</span></div>
       </div>
       <div>
         <span className="customer-stat-icon amber"><Receipt size={18} /></span>
@@ -46,14 +48,17 @@ async function CustomerDirectory({ searchParams }: { searchParams: SearchParams 
   const filters = customerFiltersSchema.parse({
     search: first(raw.q) || undefined,
     type: first(raw.type),
+    tag: first(raw.tag),
   });
-  const filtered = Boolean(filters.search || filters.type);
+  const filtered = Boolean(filters.search || filters.type || filters.tag);
   const pagination = parsePagination({ page: first(raw.page), limit: first(raw.limit) });
-  const [{ tenant }, result, stats] = await Promise.all([
+  const [{ tenant }, result, stats, types, tags] = await Promise.all([
     getShopSession(),
     getCustomers(filters, pagination),
     // Stats always describe the whole directory, not the filtered view or page.
     getCustomerStats(),
+    getCustomerTypes(),
+    getCustomerTags(),
   ]);
   const pastEnd = pastEndRedirect("/customers", raw, result);
   if (pastEnd) redirect(pastEnd);
@@ -63,12 +68,13 @@ async function CustomerDirectory({ searchParams }: { searchParams: SearchParams 
       <CustomerStats stats={stats} money={tenant.money} />
       <section className="card customer-card">
         <Suspense>
-          <CustomerFilters />
+          <CustomerFilters types={types} tags={tags} />
         </Suspense>
         <CustomerTable
           result={result}
           money={tenant.money}
           allowInternationalPhones={tenant.allowInternationalPhones}
+          tags={tags}
           filtered={filtered}
         />
       </section>
@@ -86,6 +92,7 @@ export default function CustomersPage({ searchParams }: { searchParams: SearchPa
           <p>Manage business accounts, contacts, and quote history.</p>
         </div>
         <div className="heading-actions">
+          <ExportCustomersButton />
           <Suspense
             fallback={
               <button type="button" className="button button-primary" disabled>

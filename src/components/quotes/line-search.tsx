@@ -5,6 +5,7 @@ import { Box, Check, Loader2, PenLine, Plus, Search } from "lucide-react";
 import { colorStyle } from "@/lib/category-colors";
 import { formatMoney, type MoneyFormat } from "@/lib/format";
 import { LOOKUP_DELAY_MS } from "@/lib/search-delay";
+import { formatQty } from "@/lib/uom";
 import type { PickerItem, PickerItemsResponse } from "@/lib/types/quote";
 import { MobileSheet } from "./mobile-sheet";
 
@@ -26,9 +27,10 @@ type Props = {
 /** Available = on hand − reserved on open quotations. */
 function Stock({ item }: { item: PickerItem }) {
   const available = item.quantity_on_hand - item.reserved_quantity;
-  const reserved = item.reserved_quantity > 0 ? ` · ${item.reserved_quantity} reserved` : "";
+  const unit = item.units[0]?.code;
+  const reserved = item.reserved_quantity > 0 ? ` · ${formatQty(item.reserved_quantity)} reserved` : "";
   const tone = available <= 0 ? "stock-out" : available <= item.low_stock_threshold ? "stock-low" : "in-stock";
-  return <span className={tone}>{available <= 0 ? "None available" : `${available} available`}{reserved}</span>;
+  return <span className={tone}>{available <= 0 ? "None available" : `${formatQty(available, unit)} available`}{reserved}</span>;
 }
 
 /** Products matching the query (and category), fetched while `enabled`, 200ms after the last keystroke. */

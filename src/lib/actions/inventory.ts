@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { planLimitMessage } from "@/lib/plan-limits";
 import type { Tables } from "@/lib/types/database.types";
 import type { InventoryListItem } from "@/lib/types/inventory";
+import { ITEM_UNITS_EMBED, type BaseUnit, type ItemConversion } from "@/lib/uom";
 import {
   inventoryFiltersSchema,
   inventoryItemSchema,
@@ -25,10 +26,12 @@ export type InventoryActionResult =
 
 const itemIdSchema = z.uuid();
 
-const ITEM_WITH_FITMENT = "*, item_vehicle_compatibility(vehicles(id, year, make, model, trim))";
+const ITEM_WITH_FITMENT = `*, item_vehicle_compatibility(vehicles(id, year, make, model, trim)), ${ITEM_UNITS_EMBED}`;
 
 type InventoryRow = Tables<"inventory_items"> & {
   item_vehicle_compatibility: { vehicles: InventoryListItem["vehicles"][number] | null }[];
+  base_uom: BaseUnit | null;
+  item_uom_conversions: ItemConversion[];
 };
 
 export type InventoryPage = Paged<InventoryListItem> & {
@@ -113,8 +116,15 @@ export async function getInventoryItems(filters: InventoryFilters = {}, paginati
     throw new Error("Could not load inventory.");
   }
 
-  const rows: InventoryListItem[] = (data ?? []).map(({ item_vehicle_compatibility, ...item }) => ({
+  const rows: InventoryListItem[] = (data ?? []).map(({ item_vehicle_compatibility, item_uom_conversions, ...item }) => ({
     ...item,
+    quantity_on_hand: Number(item.quantity_on_hand),
+    reserved_quantity: Number(item.reserved_quantity),
+    low_stock_threshold: Number(item.low_stock_threshold),
+    available_quantity: item.available_quantity === null ? null : Number(item.available_quantity),
+    conversions: item_uom_conversions
+      .map((c) => ({ ...c, factor: Number(c.factor), selling_price: c.selling_price === null ? null : Number(c.selling_price) }))
+      .sort((a, b) => a.sort_order - b.sort_order),
     vehicles: item_vehicle_compatibility
       .flatMap((link) => (link.vehicles ? [link.vehicles] : []))
       .sort((a, b) => b.year - a.year || a.make.localeCompare(b.make) || a.model.localeCompare(b.model)),
@@ -152,6 +162,16 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
     p_vendor_name: item.vendorName || undefined,
     p_vehicle_ids: item.isUniversal ? [] : item.vehicleIds,
     p_attributes: item.attributes,
+    p_base_uom_id: item.baseUomId,
+    p_purchase_uom_id: item.purchaseUomId ?? undefined,
+    p_sale_uom_id: item.saleUomId ?? undefined,
+    p_conversions: item.conversions.map((c, i) => ({
+      uom_id: c.uomId,
+      factor: c.factor,
+      selling_price: c.sellingPrice,
+      barcode: c.barcode || null,
+      sort_order: i,
+    })),
   });
 
   if (error) {
@@ -159,6 +179,9 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
     if (limit) return { status: "error", message: limit };
     switch (error.code) {
       case "23505":
+        if (error.message.includes("barcode")) {
+          return { status: "error", field: "conversions", message: "One of these barcodes is already used by another product." };
+        }
         return { status: "error", field: "sku", message: `SKU ${item.sku} is already used by another item.` };
       case "23514":
         if (error.message.includes("inventory_reserved_within_stock")) {
@@ -168,9 +191,15 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
             message: "Stock on hand can't go below what open quotations have reserved. Cancel or invoice those quotations first.",
           };
         }
+        // Unit rules (base unit already on documents, purchase / sale unit) explain themselves.
+        if (error.message.includes("base unit")) return { status: "error", field: "baseUomId", message: error.message };
+        if (error.message.includes("unit") || error.message.includes("pack")) return { status: "error", field: "conversions", message: error.message };
         console.error("saveInventoryItem failed:", error);
         return { status: "error", message: "We couldn't save this item. Please try again." };
       case "23503":
+        if (error.message.includes("uom")) {
+          return { status: "error", field: "baseUomId", message: "That unit no longer exists. Choose another one." };
+        }
         if (error.message.includes("inventory_items_category_fkey")) {
           return { status: "error", field: "categoryId", message: "That category no longer exists. Choose another one." };
         }
@@ -180,6 +209,9 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
         // Fitment, archived-category and attribute checks explain themselves.
         if (error.message.startsWith("Vehicle")) return { status: "error", field: "vehicleIds", message: error.message };
         if (error.message.includes("category")) return { status: "error", field: "categoryId", message: error.message };
+        // "pcs is counted in whole numbers." and similar decimal-place rules.
+        if (/whole numbers|decimal places/.test(error.message)) return { status: "error", field: "quantityOnHand", message: error.message };
+        if (error.message.includes("unit")) return { status: "error", field: "baseUomId", message: error.message };
         return { status: "error", message: error.message };
       case "23502":
         // A required attribute left empty.

@@ -18,6 +18,8 @@ type Props = {
   today: string;
   /** Shop setting: first calendar column (1 Monday, 6 Saturday, 7 Sunday). */
   weekStart: WeekStart;
+  /** Other URL params to keep when the dates change (e.g. the reports' ?tag=). */
+  keep?: Record<string, string>;
 };
 
 // ---- Plain calendar arithmetic on YYYY-MM-DD strings (UTC, so no timezone shifts) ----
@@ -75,7 +77,7 @@ function activePreset(list: Preset[], range: RangeKey, from: string, to: string)
  * Date range for the dashboard figures: shortcuts plus a two-month calendar, kept in the URL (?range=&from=&to=).
  * Phones get a bottom sheet with one month instead of the popover (Phase 11).
  */
-export function DateRangePicker({ range, from, to, today, weekStart }: Props) {
+export function DateRangePicker({ range, from, to, today, weekStart, keep }: Props) {
   const phone = useMediaQuery(PHONE_QUERY);
   const router = useRouter();
   const pathname = usePathname();
@@ -94,7 +96,7 @@ export function DateRangePicker({ range, from, to, today, weekStart }: Props) {
 
   const go = (query: Record<string, string>) => {
     setOpen(false);
-    const qs = new URLSearchParams(query).toString();
+    const qs = new URLSearchParams({ ...keep, ...query }).toString();
     startTransition(() => router.replace(`${pathname}?${qs}`, { scroll: false }));
   };
 

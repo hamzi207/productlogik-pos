@@ -14,6 +14,7 @@ import {
   type DocumentStage,
 } from "@/lib/documents";
 import type { DocumentListItem, QuoteDocument } from "@/lib/types/quote";
+import { ITEM_UNITS_EMBED, unitOptions } from "@/lib/uom";
 import {
   DOCUMENT_STAGES,
   documentFiltersSchema,
@@ -111,11 +112,11 @@ export async function getDocuments(
 /** One document with its lines (in order) and payments, or null when it doesn't exist. */
 export async function getQuote(id: string): Promise<QuoteDocument | null> {
   if (!idSchema.safeParse(id).success) return null;
-  const supabase = await createClient();
+  const [supabase, { tenant }] = await Promise.all([createClient(), getShopSession()]);
   const { data, error } = await supabase
     .from("quotes")
     .select(
-      "*, customers(id, name, customer_type, whatsapp_number, is_walk_in, default_discount_percentage, billing_address, credit_days, email), quote_items(*, inventory_items(sku, quantity_on_hand, reserved_quantity)), invoice_payments(*, invoice_payment_items(*))",
+      `*, customers(id, name, customer_type, whatsapp_number, is_walk_in, default_discount_percentage, billing_address, credit_days, email), quote_items(*, inventory_items(sku, quantity_on_hand, reserved_quantity, selling_price, ${ITEM_UNITS_EMBED})), invoice_payments(*, invoice_payment_items(*))`,
     )
     .eq("id", id)
     .order("sort_order", { referencedTable: "quote_items" })
@@ -141,11 +142,14 @@ export async function getQuote(id: string): Promise<QuoteDocument | null> {
     lines: quote_items.map(({ inventory_items: stock, ...line }) => ({
       ...line,
       quantity: Number(line.quantity),
+      uom_factor: Number(line.uom_factor),
+      // Packs switched off: the base unit only, plus the unit this line was saved in.
+      units: stock ? unitOptions(stock, tenant.packsEnabled, line.uom_id) : [],
       unit_price: Number(line.unit_price),
       discount_value: Number(line.discount_value),
       sku: stock?.sku ?? null,
       // What this line could use: free stock plus what it already holds.
-      available: stock ? stock.quantity_on_hand - stock.reserved_quantity + line.reserved_qty + line.deducted_qty : null,
+      available: stock ? Number(stock.quantity_on_hand) - Number(stock.reserved_quantity) + Number(line.reserved_qty) + Number(line.deducted_qty) : null,
     })),
   };
 }
@@ -218,6 +222,7 @@ export async function saveQuote(id: string | null, input: QuoteInput, stage: Doc
       unit_price: l.unitPrice,
       discount_type: l.discountType,
       discount_value: l.discountValue,
+      uom_id: l.itemId ? (l.uomId ?? null) : null,
     })),
   });
   if (error) return dbError(error, "saveQuote");

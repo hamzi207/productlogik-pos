@@ -2,10 +2,6 @@ import { z } from "zod";
 import { parsePhone } from "@/lib/phone";
 import { parseCnicOrNtn, parseStrn } from "@/lib/tax-id";
 
-// Mirrors the customers.customer_type check constraint.
-export const CUSTOMER_TYPES = ["Dealership", "Fleet Account", "Retail Customer"] as const;
-export type CustomerType = (typeof CUSTOMER_TYPES)[number];
-
 // Sales tax registration with FBR (customers.tax_registration_status).
 export const TAX_REGISTRATION_STATUSES = ["unregistered", "registered"] as const;
 export type TaxRegistrationStatus = (typeof TAX_REGISTRATION_STATUSES)[number];
@@ -50,15 +46,17 @@ function taxNumberField(parse: (value: string) => { ok: true; value: string } | 
 }
 
 /**
- * Built per shop: international numbers depend on the shop's setting.
- * Mirrors customers_tax_identity_check / customers_strn_required_check: business
- * (dealership / fleet) and sales-tax-registered customers need a CNIC or NTN;
- * registered customers also need an STRN.
+ * Built per shop: international numbers depend on the shop's setting, and `requiresTax` says which of the
+ * organization's customer types need tax details (Phase 19, customers_check_type trigger). Customers of
+ * those types and sales-tax-registered customers need a CNIC or NTN; registered customers also need an STRN.
  */
-export function customerSchema(allowInternational: boolean) {
+export function customerSchema(allowInternational: boolean, requiresTax: (type: string) => boolean = () => false) {
   return z.object({
     name: text(120, "Name").min(2, "Enter the customer or company name."),
-    customerType: z.enum(CUSTOMER_TYPES, { error: "Choose a customer type." }),
+    /** The name of one of the organization's customer types (the database checks it exists and isn't archived). */
+    customerType: text(40, "Customer type").min(1, "Choose a customer type."),
+    /** RF-19.2: the customer's tags. */
+    tagIds: z.array(z.uuid()).max(20, "A customer can have at most 20 tags."),
     contactPerson: text(80, "Contact person"),
     whatsappNumber: phoneField(allowInternational, { required: true, whatsapp: true }),
     phone: phoneField(allowInternational, { required: false, whatsapp: false }),
@@ -81,13 +79,13 @@ export function customerSchema(allowInternational: boolean) {
     notes: text(1000, "Notes"),
   }).superRefine((c, ctx) => {
     const registered = c.taxRegistrationStatus === "registered";
-    if ((c.customerType !== "Retail Customer" || registered) && !c.cnicOrNtn) {
+    if ((requiresTax(c.customerType) || registered) && !c.cnicOrNtn) {
       ctx.addIssue({
         code: "custom",
         path: ["cnicOrNtn"],
         message: registered
           ? "Tax-registered customers need a CNIC or NTN for sales tax invoices."
-          : "Dealerships and fleet accounts need a CNIC or NTN for tax invoices.",
+          : `${c.customerType} customers need a CNIC or NTN for tax invoices.`,
       });
     }
     if (registered && !c.strn) {
@@ -104,7 +102,10 @@ export type CustomerInput = z.output<ReturnType<typeof customerSchema>>;
 // URL search params for /customers. Invalid values are dropped, not errors.
 export const customerFiltersSchema = z.object({
   search: z.string().trim().max(100).optional().catch(undefined),
-  type: z.enum(CUSTOMER_TYPES).optional().catch(undefined),
+  /** A customer type's name. */
+  type: z.string().trim().min(1).max(40).optional().catch(undefined),
+  /** RF-19.2: a customer tag id. */
+  tag: z.uuid().optional().catch(undefined),
 });
 
 export type CustomerFilters = z.infer<typeof customerFiltersSchema>;

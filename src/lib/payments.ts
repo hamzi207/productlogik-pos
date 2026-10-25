@@ -1,4 +1,5 @@
 import type { QuoteDocument } from "@/lib/types/quote";
+import { formatNumber } from "@/lib/uom";
 
 /** What one invoice line is worth and how much of it has been paid through item payments. */
 export type LineBalance = {
@@ -43,5 +44,5 @@ export function lineBalances(doc: QuoteDocument): LineBalance[] {
 
 /** "Brake pads ×2, Oil filter" for toasts and the payments list. */
 export function allocationSummary(items: { description: string; quantity: number | null }[]) {
-  return items.map((i) => (i.quantity ? `${i.description} ×${Number(i.quantity)}` : i.description)).join(", ");
+  return items.map((i) => (i.quantity ? `${i.description} ×${formatNumber(Number(i.quantity))}` : i.description)).join(", ");
 }

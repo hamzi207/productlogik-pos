@@ -6,6 +6,7 @@ import { getInventoryItems } from "@/lib/actions/inventory";
 import { getShopSession } from "@/lib/auth";
 import { getAttributes, getCategories, getCategoryCounts } from "@/lib/category-data";
 import { hasModule } from "@/lib/module-data";
+import { getUnits } from "@/lib/uom-data";
 import { parsePagination, pastEndRedirect } from "@/lib/pagination";
 import { ATTR_PARAM, inventoryFiltersSchema } from "@/lib/validations/inventory.schema";
 import { AddItemButton } from "@/components/inventory/add-item-button";
@@ -30,11 +31,12 @@ function attributeParams(raw: Record<string, string | string[] | undefined>) {
 }
 
 async function AddItemAction() {
-  const [{ tenant }, categories, attributes, fitment] = await Promise.all([
+  const [{ tenant }, categories, attributes, fitment, units] = await Promise.all([
     getShopSession(),
     getCategories(),
     getAttributes(),
     hasModule("vehicle_fitment"),
+    getUnits(),
   ]);
   return (
     <AddItemButton
@@ -42,6 +44,8 @@ async function AddItemAction() {
       pricesIncludeTax={tenant.pricesIncludeTax}
       categories={categories}
       attributes={attributes}
+      units={units}
+      packsEnabled={tenant.packsEnabled}
       fitment={fitment}
     />
   );
@@ -86,11 +90,12 @@ async function InventoryResults({ searchParams }: { searchParams: SearchParams }
     attributes: attributeParams(raw),
   });
   const pagination = parsePagination({ page: first(raw.page), limit: first(raw.limit) });
-  const [result, { tenant }, categories, attributes] = await Promise.all([
+  const [result, { tenant }, categories, attributes, units] = await Promise.all([
     getInventoryItems(filters, pagination),
     getShopSession(),
     getCategories(),
     getAttributes(),
+    getUnits(),
   ]);
   const pastEnd = pastEndRedirect("/inventory", raw, result);
   if (pastEnd) redirect(pastEnd);
@@ -104,6 +109,8 @@ async function InventoryResults({ searchParams }: { searchParams: SearchParams }
       pricesIncludeTax={tenant.pricesIncludeTax}
       categories={categories}
       attributes={attributes}
+      units={units}
+      packsEnabled={tenant.packsEnabled}
       fitment={fitment}
       filtered={filtered}
     />

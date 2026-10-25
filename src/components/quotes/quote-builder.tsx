@@ -129,6 +129,11 @@ function linesFrom(doc: QuoteDocument | null): BuilderLine[] {
     discountType: l.discount_type === "amount" ? "amount" : "percent",
     discountValue: l.discount_value,
     stock: l.item_id ? l.available : null,
+    uomId: l.item_id ? l.uom_id : null,
+    uomLabel: l.uom_label,
+    uomFactor: l.uom_factor,
+    uomDecimals: l.item_id ? (l.units.find((u) => u.id === l.uom_id)?.decimals ?? 0) : 3,
+    units: l.units,
   }));
 }
 
@@ -255,6 +260,7 @@ function BuilderForm({
         unitPrice: l.unitPrice,
         discountType: l.discountType,
         discountValue: l.discountValue,
+        uomId: l.uomId,
       })),
     }),
     [customer, walkInName, walkInPhone, discountType, discountValue, discountReason, notes, isInvoice, dueDate, lines],
@@ -275,10 +281,15 @@ function BuilderForm({
 
   const addItem = useCallback((item: PickerItem) => {
     setLines((prev) => {
-      const existing = prev.find((l) => l.itemId === item.id);
+      // A scanned pack adds to a line in that pack, else starts its own line.
+      const scanned = item.scan_uom_id ?? null;
+      const existing = prev.find((l) => l.itemId === item.id && (scanned === null || l.uomId === scanned));
       if (existing) {
-        return prev.map((l) => (l === existing ? { ...l, quantity: Math.floor(l.quantity || 0) + 1 } : l));
+        const qty = existing.quantity || 0;
+        return prev.map((l) => (l === existing ? { ...l, quantity: (existing.uomDecimals > 0 ? qty : Math.floor(qty)) + 1 } : l));
       }
+      // RF-19.1: a new line starts in the scanned pack, else the product's sale unit, else its base unit.
+      const unit = item.units.find((u) => u.id === scanned) ?? item.units.find((u) => u.id === item.sale_uom_id) ?? item.units[0];
       return [
         ...prev,
         {
@@ -288,11 +299,16 @@ function BuilderForm({
           description: item.name,
           isLabor: false,
           quantity: 1,
-          unitPrice: item.selling_price,
+          unitPrice: unit?.price ?? item.selling_price,
           priceIncludesTax: item.price_includes_tax,
           discountType: "percent",
           discountValue: 0,
           stock: item.quantity_on_hand - item.reserved_quantity,
+          uomId: unit?.id ?? null,
+          uomLabel: unit?.code ?? null,
+          uomFactor: unit?.factor ?? 1,
+          uomDecimals: unit?.decimals ?? 0,
+          units: item.units,
         },
       ];
     });
@@ -313,6 +329,11 @@ function BuilderForm({
         discountType: "percent",
         discountValue: 0,
         stock: null,
+        uomId: null,
+        uomLabel: null,
+        uomFactor: 1,
+        uomDecimals: 3,
+        units: [],
       },
     ]);
 

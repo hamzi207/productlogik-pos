@@ -6,6 +6,9 @@ import { peopleNames, requireSuperadmin } from "@/lib/superadmin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { allRows } from "@/lib/supabase/all-rows";
 import type { Tables } from "@/lib/types/database.types";
+import { UNIT_COLUMNS, UNIT_PRESET_COLUMNS, type Unit, type UnitPreset } from "@/lib/uom";
+import { CUSTOMER_TAG_COLUMNS, CUSTOMER_TYPE_COLUMNS, type CustomerTag, type CustomerTypeOption } from "@/lib/customer-lists";
+import { countTags } from "@/lib/customer-list-data";
 
 // Console reads for Phase 18 (industries, catalogs, organization categories, attributes, requests).
 // Service role behind requireSuperadmin(): the console sees every industry and organization.
@@ -339,7 +342,29 @@ export type AdminProduct = Pick<
   | "is_universal"
   | "attributes"
   | "updated_at"
+  | "base_uom_id"
 >;
+
+/** One organization's units of measure, archived ones too (console Products tab and Settings parity). */
+export async function getTenantUnits(tenantId: string): Promise<Unit[]> {
+  await requireSuperadmin();
+  const { data, error } = await createAdminClient()
+    .from("units_of_measure")
+    .select(UNIT_COLUMNS)
+    .eq("tenant_id", tenantId)
+    .order("sort_order")
+    .order("code");
+  if (error) throw new Error(`units_of_measure: ${error.message}`);
+  return data;
+}
+
+/** The platform's unit presets (the console's Add unit picks). */
+export async function getUnitPresetsForConsole(): Promise<UnitPreset[]> {
+  await requireSuperadmin();
+  const { data, error } = await createAdminClient().from("uom_presets").select(UNIT_PRESET_COLUMNS).order("sort_order");
+  if (error) throw new Error(`uom_presets: ${error.message}`);
+  return data;
+}
 
 /** The console's Products tab: one organization's products (search by name or SKU, filter by category and below), a page at a time. */
 export async function getTenantProducts(tenantId: string, filters: { q: string; categoryIds: string[] | null }, pagination: Pagination) {
@@ -347,7 +372,7 @@ export async function getTenantProducts(tenantId: string, filters: { q: string; 
   const admin = createAdminClient();
   let query = admin
     .from("inventory_items")
-    .select("id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, price_includes_tax, is_universal, attributes, updated_at", { count: "exact" })
+    .select("id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, price_includes_tax, is_universal, attributes, updated_at, base_uom_id", { count: "exact" })
     .eq("tenant_id", tenantId);
   // Characters PostgREST's or() filter would read as syntax.
   const q = filters.q.replace(/[%,()*\\]/g, " ").trim();
@@ -357,4 +382,28 @@ export async function getTenantProducts(tenantId: string, filters: { q: string; 
   const { data, count, error } = await query.order("name").range(from, to);
   if (error && !isRangePastEnd(error)) throw new Error(`inventory_items: ${error.message}`);
   return { rows: (data ?? []) as AdminProduct[], total: count ?? 0, ...pagination };
+}
+
+/** One organization's customer types, tags and customers per tag (console parity for Settings → Customers). */
+export async function getTenantCustomerLists(tenantId: string) {
+  await requireSuperadmin();
+  const admin = createAdminClient();
+  const [types, tags, links] = await Promise.all([
+    admin.from("customer_types").select(CUSTOMER_TYPE_COLUMNS).eq("tenant_id", tenantId).order("sort_order").order("name"),
+    admin.from("customer_tags").select(CUSTOMER_TAG_COLUMNS).eq("tenant_id", tenantId).order("name"),
+    allRows((a, b) => admin.from("customer_tag_links").select("tag_id").eq("tenant_id", tenantId).order("customer_id").order("tag_id").range(a, b)),
+  ]);
+  if (types.error || tags.error) throw new Error(`customer lists: ${(types.error ?? tags.error)?.message}`);
+  return { types: types.data as CustomerTypeOption[], tags: tags.data as CustomerTag[], counts: countTags(links) };
+}
+
+/** One organization's packs switch and how many of its products have packs (console Units & customers). */
+export async function getTenantPackState(tenantId: string) {
+  await requireSuperadmin();
+  const admin = createAdminClient();
+  const [tenant, conversions] = await Promise.all([
+    admin.from("tenants").select("packs_enabled").eq("id", tenantId).maybeSingle(),
+    admin.from("item_uom_conversions").select("item_id").eq("tenant_id", tenantId),
+  ]);
+  return { packsEnabled: tenant.data?.packs_enabled ?? false, packProducts: new Set((conversions.data ?? []).map((r) => r.item_id)).size };
 }

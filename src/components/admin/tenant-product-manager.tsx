@@ -10,6 +10,7 @@ import type { AdminProduct } from "@/lib/admin-category-data";
 import { applicableAttributes, asValues, attributeProblem, mergeAttributeValues, type Attribute, type AttrValues } from "@/lib/attributes";
 import { buildCategoryIndex, fullPath, type Category, type CategoryIndex } from "@/lib/categories";
 import { notify } from "@/lib/notify";
+import { formatQty, type Unit } from "@/lib/uom";
 
 type Props = {
   tenantId: string;
@@ -19,11 +20,14 @@ type Props = {
   categories: Category[];
   /** Industry + own attributes, not archived. */
   attributes: Attribute[];
+  /** The organization's units of measure (archived ones too). */
+  units: Unit[];
 };
 
 const money = (n: number) => n.toLocaleString("en-PK", { maximumFractionDigits: 2 });
 
-function ProductDialog({ tenantId, product, index, attributes, onClose }: { tenantId: string; product: AdminProduct | null; index: CategoryIndex; attributes: Attribute[]; onClose: () => void }) {
+function ProductDialog({ tenantId, product, index, attributes, units, onClose }: { tenantId: string; product: AdminProduct | null; index: CategoryIndex; attributes: Attribute[]; units: Unit[]; onClose: () => void }) {
+  const active = units.filter((u) => !u.is_archived || u.id === product?.base_uom_id);
   const [v, setV] = useState({
     name: product?.name ?? "",
     sku: product?.sku ?? "",
@@ -35,6 +39,7 @@ function ProductDialog({ tenantId, product, index, attributes, onClose }: { tena
     priceIncludesTax: product?.price_includes_tax ?? true,
     vendorName: product?.vendor_name ?? "",
     description: product?.description ?? "",
+    baseUomId: product?.base_uom_id ?? (active.find((u) => u.code.toLowerCase() === "pcs") ?? active[0])?.id ?? "",
   });
   const [attrs, setAttrs] = useState<AttrValues>(() => asValues(product?.attributes));
   const { busy, error, run } = useSubmit(onClose, product ? "Product saved" : "Product added");
@@ -60,6 +65,7 @@ function ProductDialog({ tenantId, product, index, attributes, onClose }: { tena
           priceIncludesTax: v.priceIncludesTax,
           vendorName: v.vendorName,
           description: v.description,
+          baseUomId: v.baseUomId,
           attributes: mergeAttributeValues(product?.attributes, fields, attrs),
         },
         product?.id,
@@ -96,6 +102,14 @@ function ProductDialog({ tenantId, product, index, attributes, onClose }: { tena
         </select>
       </label>
       <label>
+        <span>UNIT</span>
+        <select value={v.baseUomId} onChange={(e) => setV({ ...v, baseUomId: e.target.value })}>
+          {active.map((u) => (
+            <option key={u.id} value={u.id}>{u.name} ({u.code})</option>
+          ))}
+        </select>
+      </label>
+      <label>
         <span>COST PRICE</span>
         <input inputMode="decimal" value={v.costPrice} onChange={(e) => setV({ ...v, costPrice: e.target.value })} />
       </label>
@@ -105,11 +119,11 @@ function ProductDialog({ tenantId, product, index, attributes, onClose }: { tena
       </label>
       <label>
         <span>STOCK ON HAND</span>
-        <input inputMode="numeric" value={v.quantityOnHand} onChange={(e) => setV({ ...v, quantityOnHand: e.target.value })} />
+        <input inputMode="decimal" value={v.quantityOnHand} onChange={(e) => setV({ ...v, quantityOnHand: e.target.value })} />
       </label>
       <label>
         <span>LOW-STOCK ALERT AT</span>
-        <input inputMode="numeric" value={v.lowStockThreshold} onChange={(e) => setV({ ...v, lowStockThreshold: e.target.value })} />
+        <input inputMode="decimal" value={v.lowStockThreshold} onChange={(e) => setV({ ...v, lowStockThreshold: e.target.value })} />
       </label>
       <label>
         <span>VENDOR (OPTIONAL)</span>
@@ -131,8 +145,9 @@ function ProductDialog({ tenantId, product, index, attributes, onClose }: { tena
 }
 
 /** The console's Products tab: one page of an organization's products with add / edit / delete. */
-export function TenantProductManager({ tenantId, rows, total, categories, attributes }: Props) {
+export function TenantProductManager({ tenantId, rows, total, categories, attributes, units }: Props) {
   const index = useMemo(() => buildCategoryIndex(categories), [categories]);
+  const unitCode = new Map(units.map((u) => [u.id, u.code]));
   const [dialog, setDialog] = useState<{ product: AdminProduct | null } | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const [pending, startTransition] = useTransition();
@@ -180,6 +195,7 @@ export function TenantProductManager({ tenantId, rows, total, categories, attrib
               {rows.map((p) => {
                 const cat = index.byId.get(p.category_id);
                 const low = p.quantity_on_hand <= p.low_stock_threshold;
+                const stock = formatQty(Number(p.quantity_on_hand), unitCode.get(p.base_uom_id));
                 return (
                   <tr key={p.id}>
                     <td className="primary-cell">
@@ -189,7 +205,7 @@ export function TenantProductManager({ tenantId, rows, total, categories, attrib
                     <td>{cat ? fullPath(cat) : <span className="admin-muted">Hidden or removed category</span>}</td>
                     <td className="numeric">{money(Number(p.cost_price))}</td>
                     <td className="numeric">{money(Number(p.selling_price))}</td>
-                    <td className="numeric">{low ? <span className="badge badge-red">{p.quantity_on_hand}</span> : p.quantity_on_hand}</td>
+                    <td className="numeric">{low ? <span className="badge badge-red">{stock}</span> : stock}</td>
                     <td>
                       <div className="row-actions admin-row-actions">
                         <button type="button" className="icon-button" aria-label={`Edit ${p.name}`} title="Edit" onClick={() => setDialog({ product: p })}>
@@ -207,7 +223,7 @@ export function TenantProductManager({ tenantId, rows, total, categories, attrib
           </table>
         </div>
       )}
-      {dialog && <ProductDialog tenantId={tenantId} product={dialog.product} index={index} attributes={attributes} onClose={() => setDialog(null)} />}
+      {dialog && <ProductDialog tenantId={tenantId} product={dialog.product} index={index} attributes={attributes} units={units} onClose={() => setDialog(null)} />}
       <ConfirmDialog request={confirm} pending={pending} onOpenChange={(open) => !open && setConfirm(null)} />
     </>
   );
