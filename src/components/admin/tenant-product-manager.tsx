@@ -221,7 +221,8 @@ export function TenantProductManager({ tenantId, rows, total, categories, attrib
             <tbody>
               {rows.map((p) => {
                 const cat = index.byId.get(p.category_id);
-                const low = p.quantity_on_hand <= p.low_stock_threshold;
+                // A kit has no stock of its own (its products have).
+                const low = !p.is_kit && p.quantity_on_hand <= p.low_stock_threshold;
                 const stock = formatQty(Number(p.quantity_on_hand), unitCode.get(p.base_uom_id));
                 const byStore =
                   stores.length > 1
@@ -234,17 +235,26 @@ export function TenantProductManager({ tenantId, rows, total, categories, attrib
                     <td className="primary-cell">
                       <strong>{p.name}</strong>
                       <span className="mono">{p.sku}</span>
+                      {(p.group_id || p.is_kit) && <span className="badge">{p.is_kit ? "Kit" : "Variant"}</span>}
                     </td>
                     <td>{cat ? fullPath(cat) : <span className="admin-muted">Hidden or removed category</span>}</td>
                     <td className="numeric">{money(Number(p.cost_price))}</td>
                     <td className="numeric">{money(Number(p.selling_price))}</td>
                     <td className="numeric" title={byStore}>
-                      {low ? <span className="badge badge-red">{stock}</span> : stock}
+                      {p.is_kit ? <span className="admin-muted">From its products</span> : low ? <span className="badge badge-red">{stock}</span> : stock}
                       {byStore && <span className="admin-muted"> · {stores.length} stores</span>}
                     </td>
                     <td>
                       <div className="row-actions admin-row-actions">
-                        <button type="button" className="icon-button" aria-label={`Edit ${p.name}`} title="Edit" onClick={() => setDialog({ product: p })}>
+                        <button
+                          type="button"
+                          className="icon-button"
+                          aria-label={`Edit ${p.name}`}
+                          // Phase 21: variants and kits are changed in the shop (Login As).
+                          title={p.group_id || p.is_kit ? `${p.is_kit ? "Kits" : "Variants"} are changed in the shop (Login As)` : "Edit"}
+                          disabled={Boolean(p.group_id || p.is_kit)}
+                          onClick={() => setDialog({ product: p })}
+                        >
                           <Pencil size={14} />
                         </button>
                         <button type="button" className="icon-button danger" aria-label={`Delete ${p.name}`} title="Delete" disabled={pending} onClick={() => remove(p)}>

@@ -36,7 +36,7 @@ async function overLimits(admin: Admin, planId: string, next: { max_users: numbe
       if ((count ?? 0) > next.max_users) over.push({ tenantId: s.tenant_id, tenantName: name, kind: "users", usage: count ?? 0, limit: next.max_users });
     }
     if (next.max_products !== null && s.max_products === null) {
-      const { count } = await admin.from("inventory_items").select("id", { count: "exact", head: true }).eq("tenant_id", s.tenant_id);
+      const { count } = await admin.from("inventory_items").select("id", { count: "exact", head: true }).eq("tenant_id", s.tenant_id).eq("is_archived", false);
       if ((count ?? 0) > next.max_products) over.push({ tenantId: s.tenant_id, tenantName: name, kind: "products", usage: count ?? 0, limit: next.max_products });
     }
     // Stores arrive in Phase 20: every organization has one today, within any limit (min 1).

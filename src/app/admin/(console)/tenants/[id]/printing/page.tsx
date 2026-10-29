@@ -9,7 +9,7 @@ export const metadata: Metadata = { title: "Shop · Tax & Printing" };
 export default function TenantPrintingPage({ params }: { params: Promise<{ id: string }> }) {
   return (
     <Suspense fallback={<SettingsLoading />}>
-      <TenantSettingsSection params={params} sections={["tax", "printFormat"]} label="Tax & Printing" />
+      <TenantSettingsSection params={params} sections={["tax", "printFormat", "productImages"]} label="Tax & Printing" />
     </Suspense>
   );
 }

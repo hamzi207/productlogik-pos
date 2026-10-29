@@ -56,7 +56,7 @@ export type QuoteDocument = Tables<"quotes"> & {
   payments: (Tables<"invoice_payments"> & { allocations: Tables<"invoice_payment_items">[] })[];
 };
 
-/** An inventory part offered by the line-item search (with its category's name). */
+/** An inventory product offered by the line-item search (with its category's name). */
 export type PickerItem = Pick<
   Tables<"inventory_items">,
   | "id"
@@ -79,10 +79,32 @@ export type PickerItem = Pick<
    * reserved_quantity, low_stock_threshold and selling_price are that store's.
    */
   store_stock: Record<string, number>;
+  /** RF-21.2: its main image's thumbnail (a variant's comes from its group). */
+  image_url: string | null;
+  /** Phase 21: a variant's options ("Red / L") and its value ids in option order. */
+  variant_label: string | null;
+  group_id: string | null;
+  option_values: string[];
+  /** RF-21.1: a kit (its stock is the whole kits its components make) and what one holds. */
+  is_kit: boolean;
+  kit_includes: string | null;
 };
 
+/** Phase 21: a product group in line search; picking it opens the option picker. */
+export type PickerGroup = {
+  id: string;
+  name: string;
+  category: { name: string } | null;
+  image_url: string | null;
+  options: { id: string; name: string; values: { id: string; value: string }[] }[];
+  /** Its variants that are switched on (with ?store=, that store's stock and prices). */
+  variants: PickerItem[];
+};
+
+export type PickerResult = { kind: "item"; item: PickerItem } | { kind: "group"; group: PickerGroup };
+
 /** GET /api/quote-items */
-export type PickerItemsResponse = { items: PickerItem[] };
+export type PickerItemsResponse = { results: PickerResult[] };
 
 /** GET /api/customers */
 export type CustomerOptionsResponse = {

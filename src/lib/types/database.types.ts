@@ -424,7 +424,7 @@ export type Database = {
           contact_person?: string | null
           created_at?: string
           credit_days?: number
-          customer_type?: string
+          customer_type: string
           default_discount_percentage?: number
           email?: string | null
           id?: string
@@ -624,16 +624,23 @@ export type Database = {
         Row: {
           attributes: Json
           available_quantity: number | null
+          barcode: string | null
           base_uom_id: string
           category_id: string
           cost_price: number
           created_at: string
           description: string | null
+          group_id: string | null
           id: string
+          is_archived: boolean
+          is_kit: boolean
           is_low_stock: boolean | null
           is_universal: boolean
           low_stock_threshold: number
           name: string
+          option_values: Json | null
+          own_cost: boolean
+          own_price: boolean
           price_includes_tax: boolean
           purchase_uom_id: string | null
           quantity_on_hand: number
@@ -643,21 +650,29 @@ export type Database = {
           sku: string
           tenant_id: string
           updated_at: string
+          variant_label: string | null
           vendor_name: string | null
         }
         Insert: {
           attributes?: Json
           available_quantity?: number | null
+          barcode?: string | null
           base_uom_id: string
           category_id: string
           cost_price: number
           created_at?: string
           description?: string | null
+          group_id?: string | null
           id?: string
+          is_archived?: boolean
+          is_kit?: boolean
           is_low_stock?: boolean | null
           is_universal?: boolean
           low_stock_threshold?: number
           name: string
+          option_values?: Json | null
+          own_cost?: boolean
+          own_price?: boolean
           price_includes_tax?: boolean
           purchase_uom_id?: string | null
           quantity_on_hand?: number
@@ -667,21 +682,29 @@ export type Database = {
           sku: string
           tenant_id: string
           updated_at?: string
+          variant_label?: string | null
           vendor_name?: string | null
         }
         Update: {
           attributes?: Json
           available_quantity?: number | null
+          barcode?: string | null
           base_uom_id?: string
           category_id?: string
           cost_price?: number
           created_at?: string
           description?: string | null
+          group_id?: string | null
           id?: string
+          is_archived?: boolean
+          is_kit?: boolean
           is_low_stock?: boolean | null
           is_universal?: boolean
           low_stock_threshold?: number
           name?: string
+          option_values?: Json | null
+          own_cost?: boolean
+          own_price?: boolean
           price_includes_tax?: boolean
           purchase_uom_id?: string | null
           quantity_on_hand?: number
@@ -691,6 +714,7 @@ export type Database = {
           sku?: string
           tenant_id?: string
           updated_at?: string
+          variant_label?: string | null
           vendor_name?: string | null
         }
         Relationships: [
@@ -699,6 +723,20 @@ export type Database = {
             columns: ["tenant_id", "base_uom_id"]
             isOneToOne: false
             referencedRelation: "units_of_measure"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "inventory_items_category_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_items_group_fkey"
+            columns: ["tenant_id", "group_id"]
+            isOneToOne: false
+            referencedRelation: "product_groups"
             referencedColumns: ["tenant_id", "id"]
           },
           {
@@ -714,13 +752,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "units_of_measure"
             referencedColumns: ["tenant_id", "id"]
-          },
-          {
-            foreignKeyName: "inventory_items_category_fkey"
-            columns: ["category_id"]
-            isOneToOne: false
-            referencedRelation: "categories"
-            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "inventory_items_tenant_id_fkey"
@@ -957,6 +988,45 @@ export type Database = {
           },
         ]
       }
+      kit_components: {
+        Row: {
+          component_id: string
+          kit_id: string
+          position: number
+          quantity: number
+          tenant_id: string
+        }
+        Insert: {
+          component_id: string
+          kit_id: string
+          position?: number
+          quantity: number
+          tenant_id: string
+        }
+        Update: {
+          component_id?: string
+          kit_id?: string
+          position?: number
+          quantity?: number
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "kit_components_component_fkey"
+            columns: ["tenant_id", "component_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_items"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "kit_components_kit_fkey"
+            columns: ["tenant_id", "kit_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_items"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       platform_admins: {
         Row: {
           created_at: string
@@ -1064,6 +1134,210 @@ export type Database = {
           },
         ]
       }
+      product_groups: {
+        Row: {
+          attributes: Json
+          base_uom_id: string
+          category_id: string
+          cost_price: number
+          created_at: string
+          description: string | null
+          id: string
+          is_archived: boolean
+          is_universal: boolean
+          low_stock_threshold: number
+          name: string
+          price_includes_tax: boolean
+          selling_price: number
+          sku_prefix: string
+          tenant_id: string
+          updated_at: string
+          vendor_name: string | null
+        }
+        Insert: {
+          attributes?: Json
+          base_uom_id: string
+          category_id: string
+          cost_price?: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_archived?: boolean
+          is_universal?: boolean
+          low_stock_threshold?: number
+          name: string
+          price_includes_tax?: boolean
+          selling_price?: number
+          sku_prefix: string
+          tenant_id: string
+          updated_at?: string
+          vendor_name?: string | null
+        }
+        Update: {
+          attributes?: Json
+          base_uom_id?: string
+          category_id?: string
+          cost_price?: number
+          created_at?: string
+          description?: string | null
+          id?: string
+          is_archived?: boolean
+          is_universal?: boolean
+          low_stock_threshold?: number
+          name?: string
+          price_includes_tax?: boolean
+          selling_price?: number
+          sku_prefix?: string
+          tenant_id?: string
+          updated_at?: string
+          vendor_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_groups_base_uom_fkey"
+            columns: ["tenant_id", "base_uom_id"]
+            isOneToOne: false
+            referencedRelation: "units_of_measure"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "product_groups_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_groups_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_images: {
+        Row: {
+          created_at: string
+          group_id: string | null
+          id: string
+          item_id: string | null
+          path: string
+          position: number
+          tenant_id: string
+          url: string
+        }
+        Insert: {
+          created_at?: string
+          group_id?: string | null
+          id?: string
+          item_id?: string | null
+          path: string
+          position?: number
+          tenant_id: string
+          url: string
+        }
+        Update: {
+          created_at?: string
+          group_id?: string | null
+          id?: string
+          item_id?: string | null
+          path?: string
+          position?: number
+          tenant_id?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_images_group_fkey"
+            columns: ["tenant_id", "group_id"]
+            isOneToOne: false
+            referencedRelation: "product_groups"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "product_images_item_fkey"
+            columns: ["tenant_id", "item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_items"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "product_images_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      product_option_types: {
+        Row: {
+          group_id: string
+          id: string
+          name: string
+          position: number
+          tenant_id: string
+        }
+        Insert: {
+          group_id: string
+          id?: string
+          name: string
+          position: number
+          tenant_id: string
+        }
+        Update: {
+          group_id?: string
+          id?: string
+          name?: string
+          position?: number
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_option_types_group_fkey"
+            columns: ["tenant_id", "group_id"]
+            isOneToOne: false
+            referencedRelation: "product_groups"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      product_option_values: {
+        Row: {
+          id: string
+          option_type_id: string
+          position: number
+          price_delta: number
+          tenant_id: string
+          value: string
+        }
+        Insert: {
+          id?: string
+          option_type_id: string
+          position?: number
+          price_delta?: number
+          tenant_id: string
+          value: string
+        }
+        Update: {
+          id?: string
+          option_type_id?: string
+          position?: number
+          price_delta?: number
+          tenant_id?: string
+          value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_option_values_type_fkey"
+            columns: ["tenant_id", "option_type_id"]
+            isOneToOne: false
+            referencedRelation: "product_option_types"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       profile_stores: {
         Row: {
           created_at: string
@@ -1142,6 +1416,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "profiles_default_store_id_fkey"
+            columns: ["default_store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "profiles_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
@@ -1161,6 +1442,7 @@ export type Database = {
           id: string
           is_labor: boolean
           item_id: string | null
+          kit_components: Json | null
           price_includes_tax: boolean
           quantity: number
           quote_id: string
@@ -1175,6 +1457,7 @@ export type Database = {
           uom_factor: number
           uom_id: string | null
           uom_label: string | null
+          variant_label: string | null
         }
         Insert: {
           created_at?: string
@@ -1186,6 +1469,7 @@ export type Database = {
           id?: string
           is_labor?: boolean
           item_id?: string | null
+          kit_components?: Json | null
           price_includes_tax?: boolean
           quantity?: number
           quote_id: string
@@ -1200,6 +1484,7 @@ export type Database = {
           uom_factor?: number
           uom_id?: string | null
           uom_label?: string | null
+          variant_label?: string | null
         }
         Update: {
           created_at?: string
@@ -1211,6 +1496,7 @@ export type Database = {
           id?: string
           is_labor?: boolean
           item_id?: string | null
+          kit_components?: Json | null
           price_includes_tax?: boolean
           quantity?: number
           quote_id?: string
@@ -1225,22 +1511,9 @@ export type Database = {
           uom_factor?: number
           uom_id?: string | null
           uom_label?: string | null
+          variant_label?: string | null
         }
         Relationships: [
-          {
-            foreignKeyName: "quote_items_source_store_fkey"
-            columns: ["tenant_id", "source_store_id"]
-            isOneToOne: false
-            referencedRelation: "stores"
-            referencedColumns: ["tenant_id", "id"]
-          },
-          {
-            foreignKeyName: "quote_items_uom_id_fkey"
-            columns: ["uom_id"]
-            isOneToOne: false
-            referencedRelation: "units_of_measure"
-            referencedColumns: ["id"]
-          },
           {
             foreignKeyName: "quote_items_item_id_fkey"
             columns: ["item_id"]
@@ -1256,10 +1529,24 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "quote_items_source_store_fkey"
+            columns: ["tenant_id", "source_store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
             foreignKeyName: "quote_items_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_items_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "units_of_measure"
             referencedColumns: ["id"]
           },
         ]
@@ -1327,7 +1614,7 @@ export type Database = {
           quoted_at?: string | null
           share_token?: string
           status?: string
-          store_id?: string
+          store_id: string
           subtotal?: number
           tax_amount?: number
           tax_rate?: number
@@ -1378,18 +1665,18 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "quotes_store_fkey"
-            columns: ["tenant_id", "store_id"]
-            isOneToOne: false
-            referencedRelation: "stores"
-            referencedColumns: ["tenant_id", "id"]
-          },
-          {
             foreignKeyName: "quotes_customer_id_fkey"
             columns: ["customer_id"]
             isOneToOne: false
             referencedRelation: "customers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quotes_store_fkey"
+            columns: ["tenant_id", "store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["tenant_id", "id"]
           },
           {
             foreignKeyName: "quotes_tenant_id_fkey"
@@ -1472,7 +1759,7 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
-          id?: number
+          id?: never
           item_id: string
           note?: string | null
           on_hand_after: number
@@ -1488,7 +1775,7 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
-          id?: number
+          id?: never
           item_id?: string
           note?: string | null
           on_hand_after?: number
@@ -2375,6 +2662,11 @@ export type Database = {
           draft_start_number: number
           email: string | null
           id: string
+          images_on_drafts: boolean
+          images_on_invoices: boolean
+          images_on_pdf: boolean
+          images_on_share: boolean
+          images_on_quotations: boolean
           industry_id: string
           invoice_prefix: string
           invoice_start_number: number
@@ -2429,6 +2721,11 @@ export type Database = {
           draft_start_number?: number
           email?: string | null
           id?: string
+          images_on_drafts?: boolean
+          images_on_invoices?: boolean
+          images_on_pdf?: boolean
+          images_on_share?: boolean
+          images_on_quotations?: boolean
           industry_id: string
           invoice_prefix?: string
           invoice_start_number?: number
@@ -2483,6 +2780,11 @@ export type Database = {
           draft_start_number?: number
           email?: string | null
           id?: string
+          images_on_drafts?: boolean
+          images_on_invoices?: boolean
+          images_on_pdf?: boolean
+          images_on_share?: boolean
+          images_on_quotations?: boolean
           industry_id?: string
           invoice_prefix?: string
           invoice_start_number?: number
@@ -2732,9 +3034,13 @@ export type Database = {
         }
         Returns: boolean
       }
-      admin_tenant_health: { Args: { p_tenant: string }; Returns: Json }
       admin_set_store_stock: {
-        Args: { p_item: string; p_on_hand: number; p_store: string; p_tenant: string }
+        Args: {
+          p_item: string
+          p_on_hand: number
+          p_store: string
+          p_tenant: string
+        }
         Returns: {
           item_id: string
           low_stock_threshold: number | null
@@ -2744,7 +3050,14 @@ export type Database = {
           tenant_id: string
           updated_at: string
         }
+        SetofOptions: {
+          from: "*"
+          to: "stock_levels"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
+      admin_tenant_health: { Args: { p_tenant: string }; Returns: Json }
       admin_tenants: {
         Args: {
           p_archived?: boolean
@@ -2853,6 +3166,7 @@ export type Database = {
           quoted_at: string | null
           share_token: string
           status: string
+          store_id: string
           subtotal: number
           tax_amount: number
           tax_rate: number
@@ -2889,6 +3203,7 @@ export type Database = {
         }
         Returns: Json
       }
+      delete_product_group: { Args: { p_group: string }; Returns: string }
       document_list_totals: {
         Args: {
           p_search: string
@@ -2936,6 +3251,7 @@ export type Database = {
           quoted_at: string | null
           share_token: string
           status: string
+          store_id: string
           subtotal: number
           tax_amount: number
           tax_rate: number
@@ -2959,16 +3275,23 @@ export type Database = {
         Returns: {
           attributes: Json
           available_quantity: number | null
+          barcode: string | null
           base_uom_id: string
           category_id: string
           cost_price: number
           created_at: string
           description: string | null
+          group_id: string | null
           id: string
+          is_archived: boolean
+          is_kit: boolean
           is_low_stock: boolean | null
           is_universal: boolean
           low_stock_threshold: number
           name: string
+          option_values: Json | null
+          own_cost: boolean
+          own_price: boolean
           price_includes_tax: boolean
           purchase_uom_id: string | null
           quantity_on_hand: number
@@ -2978,6 +3301,7 @@ export type Database = {
           sku: string
           tenant_id: string
           updated_at: string
+          variant_label: string | null
           vendor_name: string | null
         }[]
         SetofOptions: {
@@ -2987,7 +3311,21 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      inventory_list: {
+        Args: { p_grouped?: boolean; p_query?: string; p_store_id?: string }
+        Returns: Database["public"]["CompositeTypes"]["inventory_list_row"][]
+        SetofOptions: {
+          from: "*"
+          to: "inventory_list_row"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
       is_valid_timezone: { Args: { p_tz: string }; Returns: boolean }
+      kit_available: {
+        Args: { p_kit: string; p_store?: string }
+        Returns: number
+      }
       match_vehicles: {
         Args: { p_specs: Json }
         Returns: {
@@ -2996,13 +3334,13 @@ export type Database = {
         }[]
       }
       my_modules: { Args: never; Returns: string[] }
-      my_work_stores: { Args: never; Returns: string[] }
       my_onboarding: { Args: never; Returns: Json }
       my_shop_status: { Args: never; Returns: string }
       my_status_reason: { Args: never; Returns: string }
       my_subscription: { Args: never; Returns: Json }
       my_subscription_invoice: { Args: { p_invoice: string }; Returns: Json }
       my_unpaid_notice: { Args: never; Returns: Json }
+      my_work_stores: { Args: never; Returns: string[] }
       next_document_number: {
         Args: { p_prefix: string; p_store_id?: string }
         Returns: string
@@ -3028,23 +3366,25 @@ export type Database = {
         }
         Returns: Json
       }
-
       run_subscription_cycle: { Args: { p_date: string }; Returns: Json }
       save_inventory_item: {
         Args: {
           p_attributes?: Json
+          p_barcode?: string
           p_base_uom_id?: string
           p_category_id: string
           p_conversions?: Json
           p_cost_price: number
           p_description?: string
+          p_is_kit?: boolean
           p_is_universal: boolean
           p_item_id?: string
+          p_kit_components?: Json
           p_low_stock_threshold: number
           p_name: string
           p_price_includes_tax?: boolean
           p_purchase_uom_id?: string
-          p_quantity_on_hand: number | null
+          p_quantity_on_hand: number
           p_sale_uom_id?: string
           p_selling_price: number
           p_sku: string
@@ -3055,6 +3395,7 @@ export type Database = {
         }
         Returns: string
       }
+      save_product_group: { Args: { p_group: Json }; Returns: string }
       save_quote: {
         Args: {
           p_custom_vehicle_notes?: string
@@ -3097,6 +3438,7 @@ export type Database = {
           quoted_at: string | null
           share_token: string
           status: string
+          store_id: string
           subtotal: number
           tax_amount: number
           tax_rate: number
@@ -3149,16 +3491,23 @@ export type Database = {
         Returns: {
           attributes: Json
           available_quantity: number | null
+          barcode: string | null
           base_uom_id: string
           category_id: string
           cost_price: number
           created_at: string
           description: string | null
+          group_id: string | null
           id: string
+          is_archived: boolean
+          is_kit: boolean
           is_low_stock: boolean | null
           is_universal: boolean
           low_stock_threshold: number
           name: string
+          option_values: Json | null
+          own_cost: boolean
+          own_price: boolean
           price_includes_tax: boolean
           purchase_uom_id: string | null
           quantity_on_hand: number
@@ -3168,6 +3517,7 @@ export type Database = {
           sku: string
           tenant_id: string
           updated_at: string
+          variant_label: string | null
           vendor_name: string | null
         }[]
         SetofOptions: {
@@ -3224,7 +3574,26 @@ export type Database = {
       [_ in never]: never
     }
     CompositeTypes: {
-      [_ in never]: never
+      inventory_list_row: {
+        id: string | null
+        kind: string | null
+        group_id: string | null
+        name: string | null
+        sku: string | null
+        category_id: string | null
+        is_universal: boolean | null
+        attributes: Json | null
+        selling_price: number | null
+        max_price: number | null
+        cost_price: number | null
+        quantity_on_hand: number | null
+        reserved_quantity: number | null
+        available_quantity: number | null
+        low_stock_threshold: number | null
+        is_low_stock: boolean | null
+        variant_count: number | null
+        created_at: string | null
+      }
     }
   }
 }

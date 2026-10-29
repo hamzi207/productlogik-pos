@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { z } from "zod";
 import { getShopSession } from "@/lib/auth";
+import { KIT_EMBED, kitStoreStock, mapKitParts, type KitEmbedRow } from "@/lib/kits";
 import { parsePhone } from "@/lib/phone";
 import { isRangePastEnd, pageRange, type Paged, type Pagination } from "@/lib/pagination";
 import { getStoreContext } from "@/lib/store";
@@ -120,7 +121,7 @@ export async function getQuote(id: string): Promise<QuoteDocument | null> {
   const { data, error } = await supabase
     .from("quotes")
     .select(
-      `*, customers(id, name, customer_type, whatsapp_number, is_walk_in, default_discount_percentage, billing_address, credit_days, email), quote_items(*, inventory_items(sku, quantity_on_hand, reserved_quantity, selling_price, ${ITEM_UNITS_EMBED}, stock_levels(store_id, on_hand, reserved))), invoice_payments(*, invoice_payment_items(*))`,
+      `*, customers(id, name, customer_type, whatsapp_number, is_walk_in, default_discount_percentage, billing_address, credit_days, email), quote_items(*, inventory_items(sku, is_kit, quantity_on_hand, reserved_quantity, selling_price, ${ITEM_UNITS_EMBED}, stock_levels(store_id, on_hand, reserved), ${KIT_EMBED})), invoice_payments(*, invoice_payment_items(*))`,
     )
     .eq("id", id)
     .order("sort_order", { referencedTable: "quote_items" })
@@ -146,18 +147,22 @@ export async function getQuote(id: string): Promise<QuoteDocument | null> {
     lines: quote_items.map(({ inventory_items: stock, ...line }) => {
       // Phase 20: what this line could use in each store: free stock there, plus what the line holds at its source store.
       const held = Number(line.reserved_qty) + Number(line.deducted_qty);
-      const storeStock = stock
+      // RF-21.1: a kit line could use the whole kits its products make (counting the kits it holds).
+      const kitStock = stock?.is_kit
+        ? kitStoreStock(mapKitParts(stock as KitEmbedRow), line.source_store_id ? { storeId: line.source_store_id, kits: held } : undefined)
+        : null;
+      const storeStock = kitStock ?? (stock
         ? Object.fromEntries(
             stock.stock_levels.map((l) => [l.store_id, Number(l.on_hand) - Number(l.reserved) + (l.store_id === line.source_store_id ? held : 0)]),
           )
-        : null;
+        : null);
       if (storeStock && line.source_store_id && !(line.source_store_id in storeStock)) storeStock[line.source_store_id] = held;
       return {
       ...line,
       quantity: Number(line.quantity),
       uom_factor: Number(line.uom_factor),
       // Packs switched off: the base unit only, plus the unit this line was saved in.
-      units: stock ? unitOptions(stock, tenant.packsEnabled, line.uom_id) : [],
+      units: stock ? unitOptions(stock.is_kit ? { ...stock, item_uom_conversions: [] } : stock, tenant.packsEnabled && !stock.is_kit, line.uom_id) : [],
       unit_price: Number(line.unit_price),
       discount_value: Number(line.discount_value),
       sku: stock?.sku ?? null,

@@ -34,6 +34,11 @@ const SETTING_COLUMNS = {
   weekStart: "week_start",
   quoteValidityDays: "quote_validity_days",
   printFormat: "print_format",
+  imagesOnDrafts: "images_on_drafts",
+  imagesOnQuotations: "images_on_quotations",
+  imagesOnInvoices: "images_on_invoices",
+  imagesOnPdf: "images_on_pdf",
+  imagesOnShare: "images_on_share",
 } as const satisfies Record<keyof ShopSettingsInput, keyof TablesUpdate<"tenants">>;
 
 /**

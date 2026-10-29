@@ -8,6 +8,8 @@ import { buildCategoryIndex, CATEGORY_COLUMNS } from "@/lib/categories";
 import { formatDate, type MoneyFormat } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import { formatStrn } from "@/lib/tax-id";
+import { kitIncludes } from "@/lib/kits";
+import { GROUP_IMAGES_EMBED, ITEM_IMAGES_EMBED, mainImage, thumbUrl, type ProductImage } from "@/lib/product-images";
 import { formatNumber } from "@/lib/uom";
 import { formatIban, formatWalletNumber, parseWallets } from "@/lib/validations/document-settings.schema";
 
@@ -28,6 +30,10 @@ export type PrintableLine = {
   discount: number;
   salePrice: number;
   total: number;
+  /** RF-21.2: the product's thumbnail, when Settings → Tax & Printing shows images on this kind of document. */
+  imageUrl: string | null;
+  /** RF-21.1: what a kit line holds ("2 × Clip, 1 × Cable"), from the kit as it was when the line was added. */
+  includes: string | null;
 };
 
 export type PrintablePayment = { paidOn: string; method: string; amount: number; notes: string | null; forItems: string | null };
@@ -82,10 +88,14 @@ export type PrintableDocument = {
     taxIds: string[];
   };
   lines: PrintableLine[];
+  /** RF-21.2: where the lines' images show (Settings → Tax & Printing → On the A4 PDF / customer link). */
+  pdfImages: boolean;
+  shareImages: boolean;
   totals: {
     subtotal: number;
     discount: number;
-    discountReason: string | null;
+    /** "Discount 25%" on the A4 PDF; null for a fixed-amount discount. The reason stays internal. */
+    discountPercent: number | null;
     taxRate: number;
     tax: number;
     /** Some prices already include tax. */
@@ -99,7 +109,7 @@ export type PrintableDocument = {
 };
 
 const SELECT =
-  "*, customers(name, contact_person, whatsapp_number, phone, email, billing_address, cnic_or_ntn, strn, is_walk_in), quote_items(*, inventory_items(sku, category_id, attributes)), invoice_payments(*, invoice_payment_items(description, quantity)), tenants(industry_id, name, address, phone, email, ntn, strn, logo_url, accent_color, quote_footer_notes, invoice_terms, bank_name, bank_account_title, bank_account_number, bank_iban, bank_raast_id, bank_wallets, currency, show_paisa, timezone), stores!quotes_store_fkey(name, address, phone, ntn, strn)";
+  `*, customers(name, contact_person, whatsapp_number, phone, email, billing_address, cnic_or_ntn, strn, is_walk_in), quote_items(*, inventory_items(sku, category_id, attributes, ${ITEM_IMAGES_EMBED}, group:product_groups!inventory_items_group_fkey(${GROUP_IMAGES_EMBED}))), invoice_payments(*, invoice_payment_items(description, quantity)), tenants(industry_id, name, address, phone, email, ntn, strn, logo_url, accent_color, quote_footer_notes, invoice_terms, bank_name, bank_account_title, bank_account_number, bank_iban, bank_raast_id, bank_wallets, currency, show_paisa, timezone, images_on_drafts, images_on_quotations, images_on_invoices, images_on_pdf, images_on_share), stores!quotes_store_fkey(name, address, phone, ntn, strn)` as const;
 
 const TITLE: Record<DocumentSection, string> = { drafts: "Estimate", quotations: "Quotation", invoices: "Invoice" };
 
@@ -140,6 +150,9 @@ export async function loadPrintable(
   ].filter((d): d is { label: string; value: string } => Boolean(d.value));
 
   const details = await attributeDetails(supabase, q.tenant_id, t.industry_id, q.quote_items.map((l) => l.inventory_items));
+  const includes = await kitContents(supabase, q.tenant_id, q.quote_items.map((l) => l.kit_components));
+  // RF-21.2: each kind of document has its own switch.
+  const images = section === "invoices" ? t.images_on_invoices : section === "quotations" ? t.images_on_quotations : t.images_on_drafts;
   const lines = q.quote_items.map((l, i) => ({
     description: l.description,
     details: details[i],
@@ -150,6 +163,8 @@ export async function loadPrintable(
     discount: Number(l.quantity) > 0 ? Number(l.discount_amount) / Number(l.quantity) : 0,
     salePrice: Number(l.sale_price),
     total: Number(l.total_price),
+    imageUrl: images && l.inventory_items ? imageOf(l.inventory_items) : null,
+    includes: includes[i],
   }));
 
   const payments = section === "invoices"
@@ -220,10 +235,12 @@ export async function loadPrintable(
           ].filter((v): v is string => Boolean(v)),
     },
     lines,
+    pdfImages: images && t.images_on_pdf,
+    shareImages: images && t.images_on_share,
     totals: {
       subtotal: Number(q.subtotal),
       discount: Number(q.discount_amount),
-      discountReason: q.discount_reason,
+      discountPercent: q.discount_type === "percent" ? Number(q.discount_value) : null,
       taxRate: Number(q.tax_rate),
       tax: Number(q.tax_amount),
       taxIncluded: q.quote_items.some((l) => l.price_includes_tax),
@@ -263,4 +280,36 @@ async function attributeDetails(supabase: SupabaseClient<Database>, tenantId: st
   }
   const index = buildCategoryIndex(categories);
   return products.map((p) => (p ? documentAttributeLine(applicableAttributes(attributes, index, p.category_id), p.attributes) || null : null));
+}
+
+type ImageOwner = { product_images: ProductImage[]; group: { product_images: ProductImage[] } | null };
+
+/** The line's thumbnail: the product's main image, else its group's (variants). */
+function imageOf(item: unknown) {
+  const owner = item as ImageOwner;
+  const url = mainImage(owner.product_images ?? [], owner.group?.product_images);
+  return url ? thumbUrl(url) : null;
+}
+
+/** RF-21.1: "2 × Clip, 1.5 kg × Cable" per line from the kit snapshot saved on the line (null for others). */
+async function kitContents(supabase: SupabaseClient<Database>, tenantId: string, snapshots: unknown[]): Promise<(string | null)[]> {
+  const parse = (s: unknown) =>
+    Array.isArray(s)
+      ? s.flatMap((e) => (e && typeof e === "object" && "item_id" in e ? [{ id: String(e.item_id), quantity: Number((e as { quantity: unknown }).quantity) }] : []))
+      : [];
+  const parts = snapshots.map(parse);
+  const ids = [...new Set(parts.flat().map((p) => p.id))];
+  if (ids.length === 0) return snapshots.map(() => null);
+  // The share link uses the admin client, so the organization is checked here too.
+  const { data } = await supabase
+    .from("inventory_items")
+    .select("id, name, base_uom:units_of_measure!inventory_items_base_uom_fkey(code)")
+    .eq("tenant_id", tenantId)
+    .in("id", ids);
+  const byId = new Map((data ?? []).map((r) => [r.id, r]));
+  return parts.map((list) =>
+    list.length === 0
+      ? null
+      : kitIncludes(list.map((p) => ({ name: byId.get(p.id)?.name ?? "Product", quantity: p.quantity, unit: byId.get(p.id)?.base_uom?.code ?? null }))),
+  );
 }

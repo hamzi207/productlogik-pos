@@ -20,6 +20,11 @@ export function shopSettingsValues(tenant: Awaited<ReturnType<typeof getShopSess
     taxRate: tenant.taxRate,
     pricesIncludeTax: tenant.pricesIncludeTax,
     allowInternationalPhones: tenant.allowInternationalPhones,
+    imagesOnDrafts: tenant.imagesOnDrafts,
+    imagesOnQuotations: tenant.imagesOnQuotations,
+    imagesOnInvoices: tenant.imagesOnInvoices,
+    imagesOnPdf: tenant.imagesOnPdf,
+    imagesOnShare: tenant.imagesOnShare,
   };
 }
 

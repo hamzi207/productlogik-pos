@@ -61,9 +61,12 @@ async function SharedDocument({ params }: { params: Params }) {
 
       <div className="share-lines">
         {doc.lines.map((l, i) => (
-          <div key={i} className="share-line">
+          <div key={i} className={`share-line${doc.shareImages && l.imageUrl ? " has-image" : ""}`}>
+            {/* eslint-disable-next-line @next/next/no-img-element -- product photo on Supabase Storage */}
+            {doc.shareImages && l.imageUrl && <img className="share-line-image" src={l.imageUrl} alt="" loading="lazy" draggable={false} />}
             <div>
               <strong>{l.description}</strong>
+              {l.includes && <span>Includes: {l.includes}</span>}
               {l.details && <span>{l.details}</span>}
               <span>
                 {formatQty(l.quantity, l.unit)} × {money(l.salePrice)}

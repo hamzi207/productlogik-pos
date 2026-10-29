@@ -1,12 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { Dialog } from "radix-ui";
-import { Package, Pencil, X } from "lucide-react";
+import { Layers, Package, Pencil, X } from "lucide-react";
 import { asValues, attributeText, type Attribute } from "@/lib/attributes";
 import { formatMoney, formatVehicleGroups, marginPercent, type MoneyFormat } from "@/lib/format";
 import type { StoreView } from "@/lib/stock";
 import type { InventoryListItem } from "@/lib/types/inventory";
 import { formatQty, unitOptions } from "@/lib/uom";
+import { kitAvailable, kitIncludes } from "@/lib/kits";
+import { thumbUrl, type ProductImage } from "@/lib/product-images";
 import { StoreStockTable } from "./store-stock";
 
 type Props = {
@@ -34,6 +37,29 @@ function Row({ label, value, mono }: { label: string; value: React.ReactNode; mo
   );
 }
 
+/** RF-21.2: the main image large, the others as thumbnails to switch to. */
+function Gallery({ images, name }: { images: ProductImage[]; name: string }) {
+  const [shown, setShown] = useState(0);
+  const main = images[Math.min(shown, images.length - 1)];
+  if (!main) return null;
+  return (
+    <div className="details-gallery">
+      {/* eslint-disable-next-line @next/next/no-img-element -- product photo on Supabase Storage */}
+      <img className="details-gallery-main" src={main.url} alt={name} />
+      {images.length > 1 && (
+        <div className="details-gallery-thumbs">
+          {images.map((img, i) => (
+            <button key={img.id} type="button" className={i === shown ? "active" : ""} aria-label={`Show image ${i + 1}`} aria-pressed={i === shown} onClick={() => setShown(i)}>
+              {/* eslint-disable-next-line @next/next/no-img-element -- product photo on Supabase Storage */}
+              <img src={thumbUrl(img.url)} alt="" />
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Read-only product details, opened from the product name. The vendor shows
  * here only, not in the inventory table (docs/changes.md §6).
@@ -48,6 +74,9 @@ export function InventoryItemDetails({ item, money, attributes, fitment, packsEn
   const packs = item ? unitOptions({ ...item, item_uom_conversions: item.conversions }).slice(1) : [];
   const unitName = (id: string | null) => (id ? packs.find((p) => p.id === id)?.code : undefined) ?? unit ?? "—";
   const shownAttributes = attributes.filter((a) => values[a.key] !== undefined);
+  // Variants show their group's images.
+  const images = item ? (item.images.length ? item.images : (item.group?.images ?? [])) : [];
+  const kitStock = item?.is_kit ? kitAvailable(item.kit, storeView.multi ? storeView.currentId : null) : 0;
 
   return (
     <Dialog.Root open={item !== null} onOpenChange={onOpenChange}>
@@ -56,11 +85,15 @@ export function InventoryItemDetails({ item, money, attributes, fitment, packsEn
           <Dialog.Content className="modal">
             <div className="modal-header">
               <div>
-                <span className="header-icon blue"><Package size={18} /></span>
+                <span className="header-icon blue">{item?.is_kit ? <Layers size={18} /> : <Package size={18} />}</span>
                 <div>
                   <Dialog.Title asChild><h2 className="product-details-title">{item?.name}</h2></Dialog.Title>
                   <Dialog.Description asChild>
-                    <p><span className="mono">{item?.sku}</span> · {categoryLabel}</p>
+                    <p>
+                      <span className="mono">{item?.sku}</span>
+                      {item?.variant_label ? ` · ${item.variant_label}` : ""}
+                      {item?.is_kit ? " · Kit" : ""} · {categoryLabel}
+                    </p>
                   </Dialog.Description>
                 </div>
               </div>
@@ -70,7 +103,11 @@ export function InventoryItemDetails({ item, money, attributes, fitment, packsEn
             </div>
             {item && (
               <div className="modal-body">
+                <Gallery key={item.id} images={images} name={item.name} />
                 <div className="product-details">
+                  {item.group && <Row label="Product group" value={`${item.group.name} · ${item.variant_label ?? ""}`} />}
+                  {item.barcode && <Row label="Barcode" value={item.barcode} mono />}
+                  {item.is_kit && <Row label="Each kit holds" value={kitIncludes(item.kit) || "—"} />}
                   <Row label="Vendor / supplier" value={item.vendor_name || "—"} />
                   {fitment && (
                     <Row label="Fitment" value={item.is_universal ? "Universal Fit (all vehicles)" : formatVehicleGroups(item.vehicles).join(", ")} />
@@ -100,12 +137,35 @@ export function InventoryItemDetails({ item, money, attributes, fitment, packsEn
                         .join("\n")}
                     />
                   )}
-                  <Row label={storeView.multi ? "On hand (all stores)" : "On hand"} value={formatQty(item.quantity_on_hand, unit)} />
-                  <Row label={storeView.multi ? "Reserved (all stores)" : "Reserved on quotations"} value={formatQty(item.reserved_quantity, unit)} />
-                  <Row label={storeView.multi ? "Available (all stores)" : "Available to sell"} value={formatQty(available, unit)} />
-                  <Row label="Low-stock alert at" value={formatQty(item.low_stock_threshold, unit)} />
+                  {item.is_kit ? (
+                    <Row label={storeView.multi ? `Kits available at ${storeView.currentName}` : "Kits available"} value={`${formatQty(kitStock)} (from its products' stock)`} />
+                  ) : (
+                    <>
+                      <Row label={storeView.multi ? "On hand (all stores)" : "On hand"} value={formatQty(item.quantity_on_hand, unit)} />
+                      <Row label={storeView.multi ? "Reserved (all stores)" : "Reserved on quotations"} value={formatQty(item.reserved_quantity, unit)} />
+                      <Row label={storeView.multi ? "Available (all stores)" : "Available to sell"} value={formatQty(available, unit)} />
+                      <Row label="Low-stock alert at" value={formatQty(item.low_stock_threshold, unit)} />
+                    </>
+                  )}
                 </div>
-                {storeView.multi && (
+                {item.is_kit && (
+                  <div className="product-details-stores">
+                    <h3>Products in this kit</h3>
+                    <ul className="kit-details">
+                      {item.kit.map((p) => {
+                        const at = storeView.multi ? p.stock.find((l) => l.store_id === storeView.currentId) : null;
+                        const free = storeView.multi ? (at ? at.on_hand - at.reserved : 0) : p.quantity_on_hand - p.reserved_quantity;
+                        return (
+                          <li key={p.item_id}>
+                            <span><strong>{p.name}</strong> <span className="mono">{p.sku}</span></span>
+                            <span>{formatQty(p.quantity, p.unit ?? undefined)} per kit · {formatQty(Math.max(free, 0), p.unit ?? undefined)} available{storeView.multi ? " here" : ""}</span>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                )}
+                {storeView.multi && !item.is_kit && (
                   <div className="product-details-stores">
                     <h3>Stock by store</h3>
                     <StoreStockTable stock={item.stock} view={storeView} unit={unit} />
@@ -120,7 +180,7 @@ export function InventoryItemDetails({ item, money, attributes, fitment, packsEn
               </Dialog.Close>
               {item && (
                 <button type="button" className="button button-primary" onClick={() => onEdit(item)}>
-                  <Pencil size={14} /> Edit Product
+                  <Pencil size={14} /> {item.group ? "Edit Product Group" : item.is_kit ? "Edit Kit" : "Edit Product"}
                 </button>
               )}
             </div>

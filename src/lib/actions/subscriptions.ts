@@ -99,7 +99,7 @@ async function overLimits(
 ) {
   const [{ count: users }, { count: products }] = await Promise.all([
     admin.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).is("deactivated_at", null),
-    admin.from("inventory_items").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    admin.from("inventory_items").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("is_archived", false),
   ]);
   const over: string[] = [];
   const userLimit = overrides.max_users ?? limits.max_users;

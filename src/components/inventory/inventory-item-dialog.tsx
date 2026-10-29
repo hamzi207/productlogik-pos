@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Dialog } from "radix-ui";
 import { Controller, useFieldArray, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Boxes, Car, CheckCircle2, Loader2, Package, Plus, Save, Trash2, Wand2, X } from "lucide-react";
+import { Boxes, Car, CheckCircle2, Layers, Loader2, Package, Plus, Save, Trash2, Wand2, X } from "lucide-react";
 import { createInventoryItem, updateInventoryItem } from "@/lib/actions/inventory";
 import { formatMoney, marginPercent } from "@/lib/format";
 import { notify } from "@/lib/notify";
@@ -18,6 +18,8 @@ import type { FitmentVehicle, InventoryListItem } from "@/lib/types/inventory";
 import { formatNumber, formatQty, stepFor, type Unit } from "@/lib/uom";
 import { inventoryItemSchema, type InventoryItemInput } from "@/lib/validations/inventory.schema";
 import { CategoryPicker } from "./category-picker";
+import { galleryChanged, galleryFrom, ImageGallery, saveGallery, type GalleryImage } from "./image-gallery";
+import { KitComponents, type KitPartInfo } from "./kit-components";
 import { YmmCompatibilitySelector } from "./ymm-compatibility-selector";
 
 /** New products start in pieces, else the first active unit. */
@@ -51,14 +53,16 @@ type Props = {
   storeView: StoreView;
   /** Edit this item; omit to create a new one. */
   item?: InventoryListItem;
+  /** RF-21.1: a new product starts as a kit. */
+  kit?: boolean;
 };
 
 /** Add / edit inventory product modal (Figma "Add inventory product"). */
-export function InventoryItemDialog({ open, onOpenChange, currency, pricesIncludeTax, categories, attributes, fitment, units, packsEnabled, storeView, item }: Props) {
+export function InventoryItemDialog({ open, onOpenChange, currency, pricesIncludeTax, categories, attributes, fitment, units, packsEnabled, storeView, item, kit = false }: Props) {
   // Closing with unsaved edits asks first (Cancel, X, Escape, clicking outside).
   const guard = useDiscardGuard({
     onOpenChange,
-    discardedNote: item ? `${item.name} was left as it was saved.` : "The new product was not added to inventory.",
+    discardedNote: item ? `${item.name} was left as it was saved.` : kit ? "The new kit was not added to inventory." : "The new product was not added to inventory.",
   });
   return (
     <>
@@ -67,8 +71,9 @@ export function InventoryItemDialog({ open, onOpenChange, currency, pricesInclud
           {/* Remount per open so the form always starts from the item's current values. */}
           {open && (
             <ItemForm
-              key={item?.id ?? "new"}
+              key={item?.id ?? (kit ? "new-kit" : "new")}
               item={item}
+              newKit={kit}
               currency={currency}
               pricesIncludeTax={pricesIncludeTax}
               categories={categories}
@@ -90,6 +95,7 @@ export function InventoryItemDialog({ open, onOpenChange, currency, pricesInclud
 
 function ItemForm({
   item,
+  newKit,
   currency,
   pricesIncludeTax,
   categories,
@@ -102,6 +108,7 @@ function ItemForm({
   onDone,
 }: {
   item?: InventoryListItem;
+  newKit: boolean;
   currency: string;
   pricesIncludeTax: boolean;
   categories: Category[];
@@ -117,6 +124,19 @@ function ItemForm({
   const [serverError, setServerError] = useState<string | null>(null);
   const [vehicles, setVehicles] = useState<FitmentVehicle[]>(item?.vehicles ?? []);
   const index = useMemo(() => buildCategoryIndex(categories), [categories]);
+  // RF-21.2: images are saved after the product (a new one has no id before).
+  const savedImages = useMemo(() => item?.images ?? [], [item]);
+  const [gallery, setGallery] = useState<GalleryImage[]>(() => galleryFrom(savedImages));
+  // RF-21.1: names, SKUs and stock of the kit's products, for its list.
+  const [partInfo, setPartInfo] = useState<Record<string, KitPartInfo>>(() =>
+    Object.fromEntries(
+      (item?.kit ?? []).map((p) => {
+        const at = storeView.multi ? p.stock.find((l) => l.store_id === storeView.currentId) : null;
+        const available = storeView.multi ? (at ? at.on_hand - at.reserved : 0) : p.quantity_on_hand - p.reserved_quantity;
+        return [p.item_id, { name: p.name, sku: p.sku, unit: p.unit, available }];
+      }),
+    ),
+  );
   // Phase 20: the stock field is the current store's; store prices for admins with more than one store.
   const here = item && storeView.multi ? stockAt(item.stock, storeView.currentId) : null;
   const storeRows = storeView.multi && storeView.admin
@@ -158,6 +178,9 @@ function ItemForm({
             sellingPrice: c.selling_price,
             barcode: c.barcode ?? "",
           })),
+          barcode: item.barcode ?? "",
+          isKit: item.is_kit,
+          kitComponents: item.kit.map((p) => ({ itemId: p.item_id, quantity: p.quantity })),
           purchaseUomId: item.purchase_uom_id,
           saleUomId: item.sale_uom_id,
           priceIncludesTax: item.price_includes_tax,
@@ -175,6 +198,11 @@ function ItemForm({
           lowStockThreshold: 5,
           baseUomId: defaultUnit(units)?.id,
           conversions: [],
+          barcode: "",
+          isKit: newKit,
+          kitComponents: [],
+          // A kit's cost is worked out from its products when it's saved.
+          costPrice: newKit ? 0 : undefined,
           purchaseUomId: null,
           saleUomId: null,
           priceIncludesTax: pricesIncludeTax,
@@ -185,13 +213,14 @@ function ItemForm({
         },
   });
 
-  useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
+  const imagesDirty = galleryChanged(savedImages, gallery);
+  useEffect(() => onDirtyChange(isDirty || imagesDirty), [isDirty, imagesDirty, onDirtyChange]);
 
   const { fields: conversionFields, append: addConversion, remove: removeConversion } = useFieldArray({ control, name: "conversions" });
 
-  const [cost, selling, isUniversal, categoryId, attributeValues, baseUomId, conversions, threshold] = useWatch({
+  const [cost, selling, isUniversal, categoryId, attributeValues, baseUomId, conversions, threshold, isKit] = useWatch({
     control,
-    name: ["costPrice", "sellingPrice", "isUniversal", "categoryId", "attributes", "baseUomId", "conversions", "lowStockThreshold"],
+    name: ["costPrice", "sellingPrice", "isUniversal", "categoryId", "attributes", "baseUomId", "conversions", "lowStockThreshold", "isKit"],
   });
   const unitById = new Map(units.map((u) => [u.id, u]));
   const baseUnit = unitById.get(baseUomId);
@@ -267,14 +296,19 @@ function ItemForm({
       notify.error(isEdit ? "Product not saved" : "Product not added", result.message);
       return;
     }
+    const imageProblem = await saveGallery({ itemId: result.id }, savedImages, gallery);
+    const stockText = values.isKit
+      ? `${values.kitComponents.length} product${values.kitComponents.length === 1 ? "" : "s"} per kit`
+      : `${formatQty(values.quantityOnHand, baseCode)} on hand`;
     notify.success(
       isEdit ? `${values.name} updated` : `${values.name} added to inventory`,
-      `${values.sku} · ${formatQty(values.quantityOnHand, baseCode)} on hand · ${formatMoney(values.sellingPrice, { currency, showPaisa: true })}${!fitment ? "" : values.isUniversal ? " · Universal Fit" : ` · fits ${values.vehicleIds.length} vehicle${values.vehicleIds.length === 1 ? "" : "s"}`}`,
+      `${values.sku} · ${stockText} · ${formatMoney(values.sellingPrice, { currency, showPaisa: true })}${!fitment ? "" : values.isUniversal ? " · Universal Fit" : ` · fits ${values.vehicleIds.length} vehicle${values.vehicleIds.length === 1 ? "" : "s"}`}`,
     );
+    if (imageProblem) notify.error("Some images weren't saved", `${values.name} is saved. ${imageProblem}`);
     onDone();
   });
 
-  const fieldError = (name: Exclude<keyof InventoryItemInput, "attributes" | "conversions" | "storeSettings">) =>
+  const fieldError = (name: Exclude<keyof InventoryItemInput, "attributes" | "conversions" | "storeSettings" | "kitComponents">) =>
     errors[name]?.message ? (
       <span className="field-error" id={`${name}-error`}>{errors[name]?.message}</span>
     ) : null;
@@ -288,14 +322,16 @@ function ItemForm({
     <form onSubmit={onSubmit} noValidate>
       <div className="modal-header">
         <div>
-          <span className="header-icon blue"><Package size={18} /></span>
+          <span className="header-icon blue">{isKit ? <Layers size={18} /> : <Package size={18} />}</span>
           <div>
             <Dialog.Title asChild>
-              <h2>{isEdit ? "Edit inventory product" : "Add inventory product"}</h2>
+              <h2>{isKit ? (isEdit ? "Edit kit" : "Add kit") : isEdit ? "Edit inventory product" : "Add inventory product"}</h2>
             </Dialog.Title>
             <Dialog.Description asChild>
               <p>
-                {fitment
+                {isKit
+                  ? "A bundle sold as one line. Selling it takes its products from stock."
+                  : fitment
                   ? isEdit
                     ? "Update pricing, stock and vehicle fitment."
                     : "Create a product and configure vehicle fitment."
@@ -377,6 +413,11 @@ function ItemForm({
             {fieldError("vendorName")}
           </label>
           <label>
+            <span>BARCODE (OPTIONAL)</span>
+            <input placeholder="Scan or type the code on the product" autoComplete="off" {...invalid("barcode")} {...register("barcode")} />
+            {fieldError("barcode") ?? <span className="field-note">Scanning it in line search adds this product.</span>}
+          </label>
+          <label>
             <span>UNIT</span>
             <select {...invalid("baseUomId")} {...register("baseUomId")}>
               {choosable.map((u) => (
@@ -393,9 +434,9 @@ function ItemForm({
             <span>COST PRICE · PER {baseCode.toUpperCase()}</span>
             <div className="money-input">
               <span>{currency}</span>
-              <input type="number" inputMode="decimal" step="0.01" min="0" placeholder="0.00" {...invalid("costPrice")} {...register("costPrice", { valueAsNumber: true })} />
+              <input type="number" inputMode="decimal" step="0.01" min="0" placeholder="0.00" readOnly={isKit} {...invalid("costPrice")} {...register("costPrice", { valueAsNumber: true })} />
             </div>
-            {fieldError("costPrice")}
+            {fieldError("costPrice") ?? (isKit && <span className="field-note">The cost of its products, worked out when the kit is saved.</span>)}
           </label>
           <label>
             <span>SELLING PRICE · PER {baseCode.toUpperCase()}</span>
@@ -410,6 +451,8 @@ function ItemForm({
                 </span>
               ))}
           </label>
+          {!isKit && (
+          <>
           <label>
             <span>
               {isEdit ? "STOCK ON HAND" : "STARTING STOCK"}
@@ -428,6 +471,8 @@ function ItemForm({
             <input type="number" inputMode={baseUnit?.decimals ? "decimal" : "numeric"} step={stepFor(baseUnit?.decimals ?? 0)} min="0" {...invalid("lowStockThreshold")} {...register("lowStockThreshold", { valueAsNumber: true })} />
             {fieldError("lowStockThreshold")}
           </label>
+          </>
+          )}
           <label className="span-two check-field">
             <input type="checkbox" {...register("priceIncludesTax")} />
             <div>
@@ -438,17 +483,17 @@ function ItemForm({
         </div>
 
         {storeRows.length > 0 && (
-          <div className="compatibility store-prices">
+          <div className={`compatibility store-prices${isKit ? " no-levels" : ""}`}>
             <div className="unit-packs-head">
               <div>
-                <h3>Store prices &amp; low-stock levels</h3>
+                <h3>{isKit ? "Store prices" : <>Store prices &amp; low-stock levels</>}</h3>
                 <p>Leave empty to use the price and alert level above. A store price replaces the price on that store&apos;s documents; packs with their own price keep it.</p>
               </div>
             </div>
             <div className="store-prices-grid">
               <span className="store-prices-head">STORE</span>
               <span className="store-prices-head">SELLING PRICE ({currency})</span>
-              <span className="store-prices-head">LOW STOCK AT</span>
+              {!isKit && <span className="store-prices-head">LOW STOCK AT</span>}
               {storeRows.map((s, i) => {
                 const rowError = errors.storeSettings?.[i]?.sellingPrice?.message ?? errors.storeSettings?.[i]?.lowStockThreshold?.message;
                 return (
@@ -465,6 +510,7 @@ function ItemForm({
                     />
                     <input
                       type="number"
+                      hidden={isKit}
                       inputMode={baseUnit?.decimals ? "decimal" : "numeric"}
                       step={stepFor(baseUnit?.decimals ?? 0)}
                       min="0"
@@ -480,7 +526,28 @@ function ItemForm({
           </div>
         )}
 
-        {packsEnabled && (
+        {isKit && (
+          <Controller
+            control={control}
+            name="kitComponents"
+            render={({ field }) => (
+              <KitComponents
+                value={field.value ?? []}
+                onChange={(next) => field.onChange(next)}
+                info={partInfo}
+                onInfo={(id, info) => setPartInfo((prev) => ({ ...prev, [id]: info }))}
+                kitId={item?.id}
+                store={storeView.multi ? storeView.currentId : null}
+                error={errors.kitComponents?.message ?? errors.kitComponents?.root?.message}
+                rowErrors={(field.value ?? []).map((_, i) => errors.kitComponents?.[i]?.quantity?.message ?? errors.kitComponents?.[i]?.itemId?.message)}
+              />
+            )}
+          />
+        )}
+
+        <ImageGallery value={gallery} onChange={setGallery} />
+
+        {packsEnabled && !isKit && (
         <div className="compatibility unit-packs">
           <div className="unit-packs-head">
             <div>
@@ -639,7 +706,7 @@ function ItemForm({
           ) : (
             <Plus size={14} />
           )}
-          {isSubmitting ? "Saving…" : isEdit ? "Save Changes" : "Add Inventory Product"}
+          {isSubmitting ? "Saving…" : isEdit ? "Save Changes" : isKit ? "Add Kit" : "Add Inventory Product"}
         </button>
       </div>
     </form>

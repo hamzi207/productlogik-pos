@@ -22,7 +22,7 @@ export const getCategoryCounts = cache(async (): Promise<Record<string, number>>
   let data: { category_id: string }[];
   try {
     // Every item, past the API's 1,000-row cap.
-    data = await allRows((a, b) => supabase.from("inventory_items").select("category_id").order("id").range(a, b));
+    data = await allRows((a, b) => supabase.from("inventory_items").select("category_id").eq("is_archived", false).order("id").range(a, b));
   } catch (error) {
     console.error("getCategoryCounts failed:", (error as Error).message);
     throw new Error("Could not load categories.");

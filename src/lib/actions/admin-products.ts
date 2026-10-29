@@ -13,7 +13,7 @@ import { inventoryItemSchema, type InventoryItemInput } from "@/lib/validations/
 // to that organization, not archived), attributes, SKU uniqueness, reserved stock and the plan's product
 // limit. Vehicle fitment and pack units (Phase 19) are left as they are (edit those in the shop with Login As). Audited.
 
-export type ProductInput = Omit<InventoryItemInput, "isUniversal" | "vehicleIds" | "conversions" | "purchaseUomId" | "saleUomId">;
+export type ProductInput = Omit<InventoryItemInput, "isUniversal" | "vehicleIds" | "conversions" | "purchaseUomId" | "saleUomId" | "barcode" | "isKit" | "kitComponents">;
 export type ProductResult = { status: "success" } | { status: "error"; message: string; field?: string };
 
 const uuid = z.uuid();
@@ -47,7 +47,17 @@ export async function saveTenantProduct(tenantId: string, input: ProductInput, i
   if (!uuid.safeParse(tenantId).success || (id && !uuid.safeParse(id).success) || (storeId && !uuid.safeParse(storeId).success)) {
     return { status: "error", message: "Invalid product." };
   }
-  const parsed = inventoryItemSchema.safeParse({ ...input, isUniversal: true, vehicleIds: [], conversions: [], purchaseUomId: null, saleUomId: null });
+  const parsed = inventoryItemSchema.safeParse({
+    ...input,
+    isUniversal: true,
+    vehicleIds: [],
+    conversions: [],
+    purchaseUomId: null,
+    saleUomId: null,
+    barcode: "",
+    isKit: false,
+    kitComponents: [],
+  });
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     return { status: "error", message: issue.message, field: String(issue.path[0] ?? "") };
@@ -85,6 +95,10 @@ export async function saveTenantProduct(tenantId: string, input: ProductInput, i
   if (id) {
     const { data: before } = await admin.from("inventory_items").select("*").eq("id", id).eq("tenant_id", tenantId).maybeSingle();
     if (!before) return { status: "error", message: "This product no longer exists." };
+    // Phase 21: variants are saved with their group and kits with their components, in the shop (Login As).
+    if (before.group_id || before.is_kit) {
+      return { status: "error", message: `${before.name} is a ${before.group_id ? "variant" : "kit"}. Change it in the shop (Login As).` };
+    }
     const { error } = await admin.from("inventory_items").update({ ...row, updated_at: new Date().toISOString() }).eq("id", id).eq("tenant_id", tenantId);
     if (error) return saveError(error, p.sku);
     // A pack unit that just became the base unit isn't a conversion any more (as save_inventory_item does).
@@ -111,8 +125,13 @@ export async function deleteTenantProduct(tenantId: string, id: string): Promise
   const me = await requireSuperadmin();
   if (!uuid.safeParse(tenantId).success || !uuid.safeParse(id).success) return { status: "error", message: "Invalid product." };
   const admin = createAdminClient();
+  const { data: item } = await admin.from("inventory_items").select("group_id, name").eq("id", id).eq("tenant_id", tenantId).maybeSingle();
+  if (item?.group_id) return { status: "error", message: `${item.name} is a variant. Switch it off in its product group, in the shop (Login As).` };
   const { data, error } = await admin.from("inventory_items").delete().eq("id", id).eq("tenant_id", tenantId).select("sku, name");
   if (error) {
+    if (error.code === "23503" && error.message.includes("kit_components")) {
+      return { status: "error", message: "It's in a kit. Take it out of the kit first (in the shop, Login As)." };
+    }
     console.error("admin product delete failed:", error);
     return { status: "error", message: "We couldn't delete this product. Please try again." };
   }

@@ -110,7 +110,7 @@ export async function getTenantCategoryView(tenantId: string) {
     allRows((a, b) => admin.from("categories").select(CATEGORY_COLUMNS).eq("industry_id", tenant.industry_id).order("id").range(a, b)),
     allRows((a, b) => admin.from("categories").select(CATEGORY_COLUMNS).eq("tenant_id", tenantId).order("id").range(a, b)),
     allRows((a, b) => admin.from("tenant_hidden_categories").select("category_id").eq("tenant_id", tenantId).order("category_id").range(a, b)),
-    allRows((a, b) => admin.from("inventory_items").select("category_id").eq("tenant_id", tenantId).order("id").range(a, b)),
+    allRows((a, b) => admin.from("inventory_items").select("category_id").eq("tenant_id", tenantId).eq("is_archived", false).order("id").range(a, b)),
     admin.from("category_attributes").select("*").eq("tenant_id", tenantId).order("sort_order").order("label"),
     admin.from("category_attributes").select("*").eq("industry_id", tenant.industry_id).order("sort_order").order("label"),
   ]);
@@ -219,7 +219,7 @@ export async function getRemapPlan(tenantId: string, newIndustryId: string) {
     allRows((a, b) => admin.from("categories").select(CATEGORY_COLUMNS).eq("industry_id", tenant.industry_id).order("id").range(a, b)),
     allRows((a, b) => admin.from("categories").select(CATEGORY_COLUMNS).eq("tenant_id", tenantId).order("id").range(a, b)),
     allRows((a, b) => admin.from("categories").select(CATEGORY_COLUMNS).eq("industry_id", newIndustryId).order("id").range(a, b)),
-    allRows((a, b) => admin.from("inventory_items").select("category_id").eq("tenant_id", tenantId).order("id").range(a, b)),
+    allRows((a, b) => admin.from("inventory_items").select("category_id").eq("tenant_id", tenantId).eq("is_archived", false).order("id").range(a, b)),
   ]);
   const oldIndex = buildCategoryIndex([...oldCatalog, ...own] as Category[]);
   // Own categories survive only when their whole branch is the organization's own.
@@ -344,6 +344,9 @@ export type AdminProduct = Pick<
   | "attributes"
   | "updated_at"
   | "base_uom_id"
+  | "group_id"
+  | "variant_label"
+  | "is_kit"
 > & {
   /** Phase 20: stock per store. */
   stock_levels: { store_id: string; on_hand: number; reserved: number }[];
@@ -387,8 +390,10 @@ export async function getTenantProducts(tenantId: string, filters: { q: string; 
   const admin = createAdminClient();
   let query = admin
     .from("inventory_items")
-    .select("id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, price_includes_tax, is_universal, attributes, updated_at, base_uom_id, stock_levels(store_id, on_hand, reserved)", { count: "exact" })
-    .eq("tenant_id", tenantId);
+    .select("id, sku, name, description, vendor_name, category_id, cost_price, selling_price, quantity_on_hand, low_stock_threshold, price_includes_tax, is_universal, attributes, updated_at, base_uom_id, group_id, variant_label, is_kit, stock_levels(store_id, on_hand, reserved)", { count: "exact" })
+    .eq("tenant_id", tenantId)
+    // Phase 21: switched-off variants with history stay out of the list (and the plan's product count).
+    .eq("is_archived", false);
   // Characters PostgREST's or() filter would read as syntax.
   const q = filters.q.replace(/[%,()*\\]/g, " ").trim();
   if (q) query = query.or(`name.ilike.%${q}%,sku.ilike.%${q}%`);

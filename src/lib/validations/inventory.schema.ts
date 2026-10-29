@@ -12,6 +12,10 @@ export type StockFilter = (typeof STOCK_FILTERS)[number];
 export const INVENTORY_SORTS = ["name", "newest", "stock", "price-high", "price-low"] as const;
 export type InventorySort = (typeof INVENTORY_SORTS)[number];
 
+/** Phase 21: grouped = one row per product group (expand for its variants); flat = one row per SKU. */
+export const INVENTORY_VIEWS = ["grouped", "flat"] as const;
+export type InventoryView = (typeof INVENTORY_VIEWS)[number];
+
 // numeric(10,2) tops out just under 100 million.
 const MAX_PRICE = 99_999_999.99;
 
@@ -48,6 +52,25 @@ export const conversionSchema = z.object({
 
 export type ConversionInput = z.infer<typeof conversionSchema>;
 
+/** Phase 21: one barcode per product or variant (printable characters, no spaces); empty = none. */
+export const barcodeSchema = z
+  .string()
+  .trim()
+  .max(64, "Barcode must be 64 characters or fewer.")
+  .regex(/^[!-~]*$/, "Use letters, numbers and symbols only (no spaces).");
+
+/** RF-21.1: one component of a kit, in the component's base unit. */
+export const kitComponentSchema = z.object({
+  itemId: z.uuid({ error: "Choose a product." }),
+  quantity: z
+    .number({ error: "Enter how many go in one kit." })
+    .positive("Must be more than 0.")
+    .max(100_000, "That number is too large.")
+    .refine((n) => fitsDecimals(n, 3), "Use at most 3 decimal places."),
+});
+
+export type KitComponentInput = z.infer<typeof kitComponentSchema>;
+
 export const inventoryItemSchema = z
   .object({
     sku: z
@@ -73,6 +96,10 @@ export const inventoryItemSchema = z
     /** The unit stock is counted in. */
     baseUomId: z.uuid({ error: "Choose a unit." }),
     conversions: z.array(conversionSchema).max(10, "Add at most 10 units to one product."),
+    barcode: barcodeSchema,
+    /** RF-21.1: a kit has components instead of stock (and no packs). */
+    isKit: z.boolean(),
+    kitComponents: z.array(kitComponentSchema).max(30, "A kit can have at most 30 products."),
     /** RF-19.1: the unit new purchases / document lines start in; null = the base unit. */
     purchaseUomId: z.uuid().nullable(),
     saleUomId: z.uuid().nullable(),
@@ -107,6 +134,16 @@ export const inventoryItemSchema = z
         message: "Add at least one compatible vehicle, or switch to Universal Fit.",
       });
     }
+    if (item.isKit) {
+      if (item.kitComponents.length === 0) {
+        ctx.addIssue({ code: "custom", path: ["kitComponents"], message: "Add at least one product to the kit." });
+      }
+      const parts = new Set<string>();
+      item.kitComponents.forEach((c, i) => {
+        if (parts.has(c.itemId)) ctx.addIssue({ code: "custom", path: ["kitComponents", i, "itemId"], message: "This product is listed twice." });
+        parts.add(c.itemId);
+      });
+    }
     const seen = new Set<string>();
     item.conversions.forEach((c, i) => {
       if (c.uomId === item.baseUomId) {
@@ -137,6 +174,7 @@ export const inventoryFiltersSchema = z.object({
   fitment: z.enum(FITMENT_FILTERS).optional().catch(undefined),
   stock: z.enum(STOCK_FILTERS).optional().catch(undefined),
   sort: z.enum(INVENTORY_SORTS).optional().catch(undefined),
+  view: z.enum(INVENTORY_VIEWS).optional().catch(undefined),
   /** Attribute filters (list and yes/no attributes), keyed by attribute key. */
   attributes: z.record(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/), z.string().max(100)).optional().catch(undefined),
 });

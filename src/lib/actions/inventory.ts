@@ -8,10 +8,9 @@ import { isRangePastEnd, pageRange, type Paged, type Pagination } from "@/lib/pa
 import { createClient } from "@/lib/supabase/server";
 import { planLimitMessage } from "@/lib/plan-limits";
 import { getStoreContext } from "@/lib/store";
-import type { Tables } from "@/lib/types/database.types";
-import type { InventoryListItem } from "@/lib/types/inventory";
-import { ITEM_STOCK_EMBED, mapItemStock, type ItemStockRow } from "@/lib/stock";
-import { ITEM_UNITS_EMBED, type BaseUnit, type ItemConversion } from "@/lib/uom";
+import { GROUP_SELECT, ITEM_SELECT, mapGroup, mapItem, type GroupRow, type ItemRow } from "@/lib/inventory-rows";
+import { imagePaths, PRODUCT_IMAGE_BUCKET } from "@/lib/product-images";
+import type { InventoryEntry, InventoryListItem } from "@/lib/types/inventory";
 import {
   inventoryFiltersSchema,
   inventoryItemSchema,
@@ -28,30 +27,24 @@ export type InventoryActionResult =
 
 const itemIdSchema = z.uuid();
 
-const ITEM_WITH_FITMENT = `*, item_vehicle_compatibility(vehicles(id, year, make, model, trim)), ${ITEM_UNITS_EMBED}, ${ITEM_STOCK_EMBED}`;
-
-type InventoryRow = Tables<"inventory_items"> & {
-  item_vehicle_compatibility: { vehicles: InventoryListItem["vehicles"][number] | null }[];
-  base_uom: BaseUnit | null;
-  item_uom_conversions: ItemConversion[];
-} & ItemStockRow;
-
-export type InventoryPage = Paged<InventoryListItem> & {
-  /** Low-stock parts among everything matching the filters (not just this page). */
+export type InventoryPage = Paged<InventoryEntry> & {
+  /** Low-stock rows among everything matching the filters (not just this page). */
   lowStock: number;
 };
 
 /**
- * One page of the shop's parts. Every filter and sort runs in SQL, so the page and
- * the counts agree; available / low stock are generated columns (Phase 9 migration).
+ * One page of the organization's products. Every filter and sort runs in SQL (inventory_list, Phase 21), so
+ * the page and the counts agree. Grouped (the default): one row per product, kit or product group, with a
+ * group's stock rolled up from its variants; flat: one row per SKU. Each row on the page is then loaded
+ * with its fitment, units, stock per store, images and kit components (and a group with its variants).
  */
 export async function getInventoryItems(
   filters: InventoryFilters = {},
   pagination: Pagination = { page: 1, limit: 25 },
-  /** Phase 20: the stock filters and low-stock count use this store's stock; null = organization totals. */
+  /** Phase 20: stock, store prices and low-stock levels at this store; null = organization totals. */
   storeId: string | null = null,
 ): Promise<InventoryPage> {
-  const { category, search, fitment, stock, sort, attributes } = inventoryFiltersSchema.parse(filters);
+  const { category, search, fitment, stock, sort, attributes, view } = inventoryFiltersSchema.parse(filters);
   const supabase = await createClient();
 
   // Attribute filters: a list option matches the stored text; "no" on a yes/no attribute also matches
@@ -69,23 +62,16 @@ export async function getInventoryItems(
     categoryIds = node ? descendantIds(node) : [category];
   }
 
-  // Search runs in SQL (search_inventory_items) because it has to match SKU, name,
-  // category and linked vehicles together. It returns inventory_items rows, so the
-  // fitment embed, filters and ordering still apply. A builder is single-use, hence
-  // a function: the page, the low-stock count and the past-the-end retry each build one.
-  const build = (columns: string, head = false, stockFilter = stock) => {
-    let query = storeId
-      ? supabase.rpc("inventory_items_at_store", { p_store_id: storeId, p_stock: stockFilter, p_query: search }, { count: "exact", head }).select(columns)
-      : search
-        ? supabase.rpc("search_inventory_items", { p_query: search }, { count: "exact", head }).select(columns)
-        : supabase.from("inventory_items").select(columns, { count: "exact", head });
+  // A builder is single-use, hence a function: the page, the low-stock count and the past-the-end retry each build one.
+  const build = (head = false, stockFilter = stock) => {
+    let query = supabase
+      .rpc("inventory_list", { p_store_id: storeId ?? undefined, p_grouped: view !== "flat", p_query: search }, { count: "exact", head })
+      .select("*");
     if (categoryIds) query = query.in("category_id", categoryIds);
     if (fitment) query = query.eq("is_universal", fitment === "universal");
-    if (!storeId) {
-      if (stockFilter === "in") query = query.gt("available_quantity", 0);
-      else if (stockFilter === "out") query = query.lte("available_quantity", 0);
-      else if (stockFilter === "low") query = query.eq("is_low_stock", true);
-    }
+    if (stockFilter === "in") query = query.gt("available_quantity", 0);
+    else if (stockFilter === "out") query = query.lte("available_quantity", 0);
+    else if (stockFilter === "low") query = query.eq("is_low_stock", true);
     for (const f of attributeFilters) {
       if (f.type === "select") query = query.eq(`attributes->>${f.key}`, f.value);
       else if (f.value === "yes") query = query.eq(`attributes->${f.key}`, true);
@@ -95,7 +81,7 @@ export async function getInventoryItems(
   };
 
   const ordered = () => {
-    const query = build(ITEM_WITH_FITMENT);
+    const query = build();
     switch (sort) {
       case "newest":
         return query.order("created_at", { ascending: false }).order("id");
@@ -111,15 +97,12 @@ export async function getInventoryItems(
   };
 
   const { from, to } = pageRange(pagination);
-  const [pageResult, lowResult] = await Promise.all([
-    ordered().range(from, to).overrideTypes<InventoryRow[], { merge: false }>(),
-    build("id", true, "low"),
-  ]);
+  const [pageResult, lowResult] = await Promise.all([ordered().range(from, to), build(true, "low")]);
 
   let { data, count, error } = pageResult;
   if (isRangePastEnd(error)) {
     // Asked for a page past the end: report the total so the page can redirect.
-    ({ data, count, error } = await ordered().range(0, 0).overrideTypes<InventoryRow[], { merge: false }>());
+    ({ data, count, error } = await ordered().range(0, 0));
     data = [];
   }
   if (error || lowResult.error) {
@@ -127,20 +110,39 @@ export async function getInventoryItems(
     throw new Error("Could not load inventory.");
   }
 
-  const rows: InventoryListItem[] = (data ?? []).map(({ item_vehicle_compatibility, item_uom_conversions, stock_levels, store_item_prices, ...item }) => ({
-    ...item,
-    ...mapItemStock({ stock_levels, store_item_prices }),
-    quantity_on_hand: Number(item.quantity_on_hand),
-    reserved_quantity: Number(item.reserved_quantity),
-    low_stock_threshold: Number(item.low_stock_threshold),
-    available_quantity: item.available_quantity === null ? null : Number(item.available_quantity),
-    conversions: item_uom_conversions
-      .map((c) => ({ ...c, factor: Number(c.factor), selling_price: c.selling_price === null ? null : Number(c.selling_price) }))
-      .sort((a, b) => a.sort_order - b.sort_order),
-    vehicles: item_vehicle_compatibility
-      .flatMap((link) => (link.vehicles ? [link.vehicles] : []))
-      .sort((a, b) => b.year - a.year || a.make.localeCompare(b.make) || a.model.localeCompare(b.model)),
-  }));
+  const page = data ?? [];
+  const itemIds = page.filter((r) => r.kind !== "group").map((r) => r.id!);
+  const groupIds = page.filter((r) => r.kind === "group").map((r) => r.id!);
+  const [items, groups, variants] = await Promise.all([
+    itemIds.length ? supabase.from("inventory_items").select(ITEM_SELECT).in("id", itemIds).overrideTypes<ItemRow[], { merge: false }>() : null,
+    groupIds.length ? supabase.from("product_groups").select(GROUP_SELECT).in("id", groupIds).overrideTypes<GroupRow[], { merge: false }>() : null,
+    groupIds.length
+      ? supabase.from("inventory_items").select(ITEM_SELECT).in("group_id", groupIds).eq("is_archived", false).overrideTypes<ItemRow[], { merge: false }>()
+      : null,
+  ]);
+  const failed = items?.error ?? groups?.error ?? variants?.error;
+  if (failed) {
+    console.error("getInventoryItems failed:", failed.message);
+    throw new Error("Could not load inventory.");
+  }
+
+  const itemById = new Map((items?.data ?? []).map((row) => [row.id, mapItem(row)]));
+  const byGroup = new Map<string, InventoryListItem[]>();
+  for (const row of variants?.data ?? []) {
+    const list = byGroup.get(row.group_id!) ?? [];
+    list.push(mapItem(row));
+    byGroup.set(row.group_id!, list);
+  }
+  const groupById = new Map((groups?.data ?? []).map((row) => [row.id, mapGroup(row, byGroup.get(row.id) ?? [])]));
+  // In the page's order; a row removed between the two reads is skipped.
+  const rows: InventoryEntry[] = page.flatMap((r): InventoryEntry[] => {
+    if (r.kind === "group") {
+      const group = groupById.get(r.id!);
+      return group ? [{ kind: "group", group }] : [];
+    }
+    const item = itemById.get(r.id!);
+    return item ? [{ kind: "item", item }] : [];
+  });
 
   return { rows, total: count ?? 0, lowStock: lowResult.count ?? 0, ...pagination };
 }
@@ -175,7 +177,8 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
     p_category_id: item.categoryId,
     p_cost_price: item.costPrice,
     p_selling_price: item.sellingPrice,
-    p_quantity_on_hand: item.quantityOnHand,
+    // A kit has no stock of its own (RF-21.1); the database ignores it.
+    p_quantity_on_hand: item.isKit ? 0 : item.quantityOnHand,
     p_low_stock_threshold: item.lowStockThreshold,
     p_is_universal: item.isUniversal,
     p_price_includes_tax: item.priceIncludesTax,
@@ -185,6 +188,9 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
     p_base_uom_id: item.baseUomId,
     p_purchase_uom_id: item.purchaseUomId ?? undefined,
     p_sale_uom_id: item.saleUomId ?? undefined,
+    p_barcode: item.barcode,
+    p_is_kit: item.isKit,
+    p_kit_components: item.isKit ? item.kitComponents.map((c) => ({ item_id: c.itemId, quantity: c.quantity })) : [],
     p_conversions: item.conversions.map((c, i) => ({
       uom_id: c.uomId,
       factor: c.factor,
@@ -199,6 +205,10 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
     if (limit) return { status: "error", message: limit };
     switch (error.code) {
       case "23505":
+        // Phase 21: the product's own barcode, or a pack's (one product or pack per code).
+        if (error.message.includes("inventory_items_barcode_key") || (item.barcode && error.message.includes(item.barcode))) {
+          return { status: "error", field: "barcode", message: `Barcode ${item.barcode} is already used by another product or pack.` };
+        }
         if (error.message.includes("barcode")) {
           return { status: "error", field: "conversions", message: "One of these barcodes is already used by another product." };
         }
@@ -215,6 +225,8 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
             message: "Stock on hand can't go below what open quotations have reserved. Cancel or invoice those quotations first.",
           };
         }
+        // RF-21.1 kit rules (no kits in kits, switched-off products) explain themselves.
+        if (/kit/i.test(error.message)) return { status: "error", field: "kitComponents", message: error.message };
         // Unit rules (base unit already on documents, purchase / sale unit) explain themselves.
         if (error.message.includes("base unit")) return { status: "error", field: "baseUomId", message: error.message };
         if (error.message.includes("unit") || error.message.includes("pack")) return { status: "error", field: "conversions", message: error.message };
@@ -232,6 +244,7 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
       case "22023":
         // Fitment, archived-category and attribute checks explain themselves.
         if (error.message.startsWith("Vehicle")) return { status: "error", field: "vehicleIds", message: error.message };
+        if (/kit/i.test(error.message)) return { status: "error", field: "kitComponents", message: error.message };
         if (error.message.includes("category")) return { status: "error", field: "categoryId", message: error.message };
         // "pcs is counted in whole numbers." and similar decimal-place rules.
         if (/whole numbers|decimal places/.test(error.message)) return { status: "error", field: "quantityOnHand", message: error.message };
@@ -242,6 +255,9 @@ async function saveInventoryItem(id: string | undefined, input: InventoryItemInp
         return { status: "error", message: error.message };
       case "P0002":
         return { status: "error", message: "This item no longer exists. It may have been deleted." };
+      case "55000":
+        // Variants are edited through their group; kits and products can't swap once on documents.
+        return { status: "error", message: error.message };
       case "42501":
         // Store prices (admins only) and stock in a store the member doesn't work in explain themselves.
         if (/store/i.test(error.message)) return { status: "error", message: error.message };
@@ -268,8 +284,9 @@ export async function updateInventoryItem(id: string, input: InventoryItemInput)
 }
 
 /**
- * Deletes an item; its vehicle links cascade. Quote lines that used it keep
- * their description and prices (quote_items.item_id is set to null).
+ * Deletes an item; its vehicle links, images and (kits) components cascade. Quote lines that used it keep
+ * their description and prices (quote_items.item_id is set to null). A product that's in a kit can't be
+ * deleted, and a variant is switched off through its group instead.
  */
 export async function deleteInventoryItem(id: string): Promise<InventoryActionResult> {
   if (!itemIdSchema.safeParse(id).success) {
@@ -277,15 +294,31 @@ export async function deleteInventoryItem(id: string): Promise<InventoryActionRe
   }
 
   const supabase = await createClient();
+  const { data: before } = await supabase.from("inventory_items").select("group_id, product_images!product_images_item_fkey(url)").eq("id", id).maybeSingle();
+  if (before?.group_id) {
+    return { status: "error", message: "This is a variant. Switch it off in its product group instead." };
+  }
   const { data, error } = await supabase.from("inventory_items").delete().eq("id", id).select("id");
 
   if (error) {
+    if (error.code === "23503" && error.message.includes("kit_components")) {
+      const { data: kits } = await supabase
+        .from("kit_components")
+        .select("kit:inventory_items!kit_components_kit_fkey(name)")
+        .eq("component_id", id)
+        .limit(3);
+      const names = (kits ?? []).flatMap((k) => (k.kit ? [k.kit.name] : []));
+      return { status: "error", message: `It's in ${names.length ? names.join(", ") : "a kit"}. Take it out of the kit first.` };
+    }
     console.error("deleteInventoryItem failed:", error);
     return { status: "error", message: "We couldn't delete this item. Please try again." };
   }
   if (data.length === 0) {
     return { status: "error", message: "This item no longer exists. It may have been deleted." };
   }
+  // RF-21.2: its image files go too (the rows went with the product).
+  const paths = (before?.product_images ?? []).flatMap((i) => imagePaths(i.url));
+  if (paths.length) await supabase.storage.from(PRODUCT_IMAGE_BUCKET).remove(paths);
 
   refresh();
   return { status: "success", id };

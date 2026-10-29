@@ -14,7 +14,7 @@ import {
   type CsvRowCheck,
 } from "@/lib/actions/inventory-csv";
 import { downloadCsv, toCsv } from "@/lib/csv";
-import { FITMENT_COLUMNS, IMPORT_BATCH, MAX_IMPORT_ROWS, readInventoryCsv, type CsvItemRow } from "@/lib/inventory-csv";
+import { FITMENT_COLUMNS, importBatches, MAX_IMPORT_ROWS, readInventoryCsv, type CsvItemRow } from "@/lib/inventory-csv";
 import { notify } from "@/lib/notify";
 
 const today = () => new Date().toISOString().slice(0, 10);
@@ -94,13 +94,15 @@ function CsvImport({ fitment, onClose }: { fitment: boolean; onClose: () => void
     const rows = step.rows.filter((r) => good.has(r.line));
     const results: CsvImportResult[] = [];
     setStep({ kind: "importing", file: step.file, done: 0, total: rows.length });
-    for (let i = 0; i < rows.length; i += IMPORT_BATCH) {
-      const batch = rows.slice(i, i + IMPORT_BATCH);
+    // A product group's rows go together (Phase 21), so batches are about 100 rows.
+    let done = 0;
+    for (const batch of importBatches(rows)) {
       const result = await importInventoryCsv(batch, updateExisting).catch(() => null);
       if (!result || result.status === "error") {
         for (const r of batch) results.push({ line: r.line, sku: (r.cells.sku ?? "").toUpperCase(), status: "error", message: result?.message ?? "This batch couldn't be saved." });
       } else results.push(...result.results);
-      setStep({ kind: "importing", file: step.file, done: Math.min(i + IMPORT_BATCH, rows.length), total: rows.length });
+      done += batch.length;
+      setStep({ kind: "importing", file: step.file, done, total: rows.length });
     }
     setStep({ kind: "done", results });
     router.refresh();
@@ -176,6 +178,11 @@ function CsvImport({ fitment, onClose }: { fitment: boolean; onClose: () => void
                 already be in your list (request new ones from Settings → Categories). When updating, empty cells keep the item&apos;s current value.
               </p>
             )}
+            <p className="csv-help">
+              Optional: <em>Barcode</em>; <em>Kit Components</em> (<em>CLIP-01=2; CABLE-3=1</em>) makes the row a kit; rows with the same{" "}
+              <em>Group</em> are the variants of one product, with <em>Option 1 Name</em> / <em>Option 1 Value</em> (up to 3 options). The group&apos;s
+              category, prices and unit come from its first row.
+            </p>
             {step.kind === "choose" && step.error && <div className="form-alert form-alert-error" role="alert">{step.error}</div>}
           </div>
         )}

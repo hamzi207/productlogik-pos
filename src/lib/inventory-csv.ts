@@ -3,6 +3,8 @@
 // Phase 18: custom attributes are extra "attr:<key>" columns, and the Universal / Vehicles columns
 // only count for organizations with the Vehicle Fitment module.
 // Phase 19: Unit (the base unit's code), Other Units ("box=12; carton=144@15000") and the purchase / sale units.
+// Phase 21: Barcode; Group + Option N Name / Value make rows the variants of a product group (one row per
+// variant, the group's details from its first row); Kit Components ("CLIP-01=2; CABLE-3=1") make a kit.
 import { parseCsv } from "@/lib/csv";
 
 export const CSV_COLUMNS = [
@@ -22,6 +24,15 @@ export const CSV_COLUMNS = [
   { key: "conversions", label: "Other Units", aliases: ["units", "packs", "packunits", "conversions"] },
   { key: "purchaseUnit", label: "Purchase Unit", aliases: ["buyunit", "purchaseuom"] },
   { key: "saleUnit", label: "Sale Unit", aliases: ["sellunit", "saleuom", "sellingunit"] },
+  { key: "barcode", label: "Barcode", aliases: ["ean", "upc", "gtin"] },
+  { key: "kit", label: "Kit Components", aliases: ["kit", "kititems", "components", "bundle"] },
+  { key: "group", label: "Group", aliases: ["productgroup", "parent", "variantof"] },
+  { key: "option1Name", label: "Option 1 Name", aliases: ["option1"] },
+  { key: "option1Value", label: "Option 1 Value", aliases: [] },
+  { key: "option2Name", label: "Option 2 Name", aliases: ["option2"] },
+  { key: "option2Value", label: "Option 2 Value", aliases: [] },
+  { key: "option3Name", label: "Option 3 Name", aliases: ["option3"] },
+  { key: "option3Value", label: "Option 3 Value", aliases: [] },
 ] as const;
 
 export type CsvColumnKey = (typeof CSV_COLUMNS)[number]["key"];
@@ -47,6 +58,62 @@ export type CsvItemRow = {
 export const MAX_IMPORT_ROWS = 1000;
 /** Rows saved per server call, so the dialog can show progress. */
 export const IMPORT_BATCH = 100;
+/** A product group's rows go in one call, so a call can be as large as the largest group. */
+export const MAX_GROUP_ROWS = 300;
+
+/** The Group cell, for matching rows of one product group (any capitals); null when it's not a variant. */
+export const groupKey = (row: CsvItemRow) => row.cells.group?.trim().toLowerCase() || null;
+
+/**
+ * The rows in import calls of about IMPORT_BATCH rows. A product group's rows are kept together (where its
+ * first row is), so the group is saved in one go.
+ */
+export function importBatches(rows: CsvItemRow[]): CsvItemRow[][] {
+  const units: CsvItemRow[][] = [];
+  const byGroup = new Map<string, CsvItemRow[]>();
+  for (const row of rows) {
+    const key = groupKey(row);
+    if (!key) units.push([row]);
+    else if (byGroup.has(key)) byGroup.get(key)!.push(row);
+    else {
+      const unit = [row];
+      byGroup.set(key, unit);
+      units.push(unit);
+    }
+  }
+  const batches: CsvItemRow[][] = [];
+  let current: CsvItemRow[] = [];
+  for (const unit of units) {
+    if (current.length && current.length + unit.length > IMPORT_BATCH) {
+      batches.push(current);
+      current = [];
+    }
+    current.push(...unit);
+  }
+  if (current.length) batches.push(current);
+  return batches;
+}
+
+/** "CLIP-01=2; CABLE-3=1.5" → SKU and quantity per kit. Returns the entries it couldn't read too. */
+export function parseKitCell(v: string | undefined): { parts: { sku: string; quantity: number; text: string }[]; invalid: string[] } {
+  const parts: { sku: string; quantity: number; text: string }[] = [];
+  const invalid: string[] = [];
+  for (const part of (v ?? "").split(/[;\n|]+/)) {
+    const text = part.trim();
+    if (!text) continue;
+    const m = /^([^=×]+?)\s*(?:[=×]\s*([\d.,]+))?$/.exec(text);
+    const quantity = m?.[2] !== undefined ? parseNumberCell(m[2]) : 1;
+    if (!m || quantity === null || Number.isNaN(quantity) || quantity <= 0) {
+      invalid.push(text);
+      continue;
+    }
+    parts.push({ sku: m[1].trim().toUpperCase(), quantity, text });
+  }
+  return { parts, invalid };
+}
+
+/** Kit components → "CLIP-01=2; CABLE-3=1.5". */
+export const formatKitCell = (parts: { sku: string; quantity: number }[]) => parts.map((p) => `${p.sku}=${p.quantity}`).join("; ");
 
 const normalizeHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -188,11 +255,17 @@ export const normalizeCategoryPath = (path: string) =>
     .filter(Boolean)
     .join(" › ");
 
-/** The fitment template's header and two example rows (V1). */
+/** Phase 21 columns at the end of each example row: Barcode, Kit Components, Group, Option 1–3 Name / Value. */
+const PHASE21_BLANKS = ["", "", "", "", "", "", "", "", ""];
+
+/** The fitment template's header and example rows (V1, plus Phase 21 variants and a kit). */
 const FITMENT_TEMPLATE: string[][] = [
   CSV_COLUMNS.map((c) => c.label),
-  ["PPF-CLR-001", "Clear PPF roll (1.5m x 15m)", "Exterior › Wrapping › PPF", "38000", "52000", "4", "Yes", "", "Lahore Wraps", "2", "Yes", "Self-healing clear film", "pcs", "", "", ""],
-  ["MAT-ALT-018", "Floor mats (Alto 2019+)", "Interior › Floor Mats", "2500", "4200", "12", "No", "2019-2026 SUZUKI Alto", "", "5", "", "", "set", "", "", ""],
+  ["PPF-CLR-001", "Clear PPF roll (1.5m x 15m)", "Exterior › Wrapping › PPF", "38000", "52000", "4", "Yes", "", "Lahore Wraps", "2", "Yes", "Self-healing clear film", "pcs", "", "", "", ...PHASE21_BLANKS],
+  ["MAT-ALT-018", "Floor mats (Alto 2019+)", "Interior › Floor Mats", "2500", "4200", "12", "No", "2019-2026 SUZUKI Alto", "", "5", "", "", "set", "", "", "", ...PHASE21_BLANKS],
+  ["TINT-20", "Tint film 20%", "Exterior › Wrapping › PPF", "1800", "3000", "10", "Yes", "", "", "3", "Yes", "", "pcs", "", "", "", "", "", "Tint film", "Shade", "20%", "", "", "", ""],
+  ["TINT-35", "Tint film 35%", "Exterior › Wrapping › PPF", "1800", "3000", "8", "Yes", "", "", "3", "Yes", "", "pcs", "", "", "", "", "", "Tint film", "Shade", "35%", "", "", "", ""],
+  ["KIT-ALT-MATS", "Alto mats + clear PPF kit", "Interior › Floor Mats", "", "55000", "", "Yes", "", "", "", "Yes", "Bundle sold as one line", "pcs", "", "", "", "", "MAT-ALT-018=1; PPF-CLR-001=1", "", "", "", "", "", "", ""],
 ];
 
 /**
@@ -203,8 +276,12 @@ export function templateRows(fitment: boolean, attributeKeys: string[], exampleC
   const attrHeader = attributeKeys.map((k) => ATTR_COLUMN + k);
   const blanks = attributeKeys.map(() => "");
   if (fitment) return [[...FITMENT_TEMPLATE[0], ...attrHeader], ...FITMENT_TEMPLATE.slice(1).map((r) => [...r, ...blanks])];
+  const category = exampleCategory || "Main category › Subcategory";
   return [
     [...csvColumns(false).map((c) => c.label), ...attrHeader],
-    ["ITM-001", "Example product", exampleCategory || "Main category › Subcategory", "100", "150", "120", "Your supplier", "24", "Yes", "Notes for your team", "pcs", "box=12@1700", "box", "pcs", ...blanks],
+    ["ITM-001", "Example product", category, "100", "150", "120", "Your supplier", "24", "Yes", "Notes for your team", "pcs", "box=12@1700", "box", "pcs", "8901234567890", "", "", "", "", "", "", "", "", ...blanks],
+    ["POLO-RED-M", "Polo Shirt – Red / M", category, "600", "1200", "10", "", "3", "Yes", "", "pcs", "", "", "", "", "", "Polo Shirt", "Colour", "Red", "Size", "M", "", "", ...blanks],
+    ["POLO-RED-L", "Polo Shirt – Red / L", category, "600", "1300", "6", "", "3", "Yes", "", "pcs", "", "", "", "", "", "Polo Shirt", "Colour", "Red", "Size", "L", "", "", ...blanks],
+    ["KIT-STARTER", "Starter kit", category, "", "1500", "", "", "", "Yes", "Bundle sold as one line", "pcs", "", "", "", "", "ITM-001=2; POLO-RED-M=1", "", "", "", "", "", "", "", ...blanks],
   ];
 }

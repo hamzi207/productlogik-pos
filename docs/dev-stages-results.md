@@ -942,3 +942,60 @@ Test steps:
      goes back, picking another customer swaps it. As staff the due date is read-only (and stays put
      when the customer changes); as an admin it can still be changed.
  13. Commit: git add . && git commit -m "Phase 20 - multiple stores, per-store stock, store prices and numbering"
+
+Phase 21 (Version 2: product variants, kits and image gallery), 2026-10-26 (migrations applied 2026-10-26;
+waiting for the owner's test, not committed):
+  - Products with variants: Add New Product → Product with variants. Options (up to 3, e.g. Colour and
+    Size) with a price change per value; the matrix lists every combination with its own SKU, barcode,
+    price, cost, low-stock level, stock and an on / off switch, and bulk-edits ticked variants.
+  - Inventory: Grouped | All SKUs. A group is one row (price range, total stock, low count) that opens to
+    its variants. Variants are switched off in their group; one on documents is archived, not deleted.
+  - RF-21.1 kits: Add New Product → Kit. A kit has its products instead of stock; its stock is the whole
+    kits they make at the store, its cost theirs. Selling one reserves / deducts its products (ledger
+    "Kit: <name>"), and documents show "Includes: 2 × Clip, 1 × Cable".
+  - RF-21.2 images: up to 8 per product, kit or group (resized in the browser, reorder by dragging), shown
+    in the list, line search, option picker and details. Settings → Tax & Printing → Product images on
+    documents: separate switches for estimates, quotations and invoices, plus "On the A4 PDF" and "On
+    the customer link" (console too): the chosen documents show line thumbnails where those say.
+  - One barcode per product / variant / kit; scanning it adds exactly that one.
+  - Line search: a product with variants appears once and opens the option picker (buttons per option
+    with the stock they leave); the phone sheet too.
+  - CSV: Barcode, Kit Components, Group and Option 1–3 Name / Value columns; import and export round-trip.
+  - Counts for the plan, near-limit list and categories leave out archived variants.
+Typecheck and lint pass. Migrations 20261026062158_phase21_variants_kits_schema,
+20261026063021_phase21_variants_kits_functions, 20261026063116_phase21_drop_old_save_item,
+20261026063220_phase21_save_inventory_item, 20261026063341_phase21_stock_reports,
+20261026063415_phase21_product_images, 20261026064048_phase21_switch_off_after_stock,
+20261026071226_phase21_kits_never_low, 20261026072926_phase21_images_on_pdf and
+20261026133336_phase21_images_on_share applied 2026-10-26; rolled-back SQL checks pass (variant prices and
+switching off, kits reserving / deducting / refusing / returning stock and their cost, barcode scans,
+images: own folder only, order only).
+
+Test steps:
+  1. Inventory → Add New Product ▾ → Product with variants: "Polo Shirt", prefix POLO, a category, cost
+     600, price 1200, stock unit pcs. Options: Colour = Red, Blue; Size = M, L (L +100). The matrix shows
+     4 variants: POLO-RED-M … with prices 1200 / 1300 as placeholders. Give Red / M stock 5 and a barcode,
+     switch Blue / L off, add two photos (drag the second first). Add Product.
+  2. The list (Grouped) shows Polo Shirt with "3 variants", 1,200 – 1,300 and its photo; the arrow shows
+     the variants. All SKUs lists each one with "Red / M" chips. Edit Polo Shirt: tick Red / L and Blue / M,
+     Set price 1500 → Apply, Save; both now cost 1500.
+  3. New estimate (draft): type "polo" → one Polo Shirt row; click it → the option picker. Choose Red,
+     then M (shows "5" left) → Add. The line is "Polo Shirt – Red / M". Type Red / M's barcode in the
+     search: it's added straight away. Leave the draft (drafts don't hold stock).
+  4. Add New Product ▾ → Kit: "Polo gift set", price 2500, products: Polo Red / M × 2. Its stock shows
+     "2 kits available" and its cost is 1,200. Quotation with 1 kit: Red / M shows 2 reserved and the kit
+     "1 kit available". Invoice 1 kit: Red / M's stock drops from 5 to 3; the PDF shows
+     "Includes: 2 × Polo Shirt – Red / M".
+  5. Settings → Tax & Printing → Product images on documents: switch Invoices on, Save Settings. The
+     invoice PDF and its customer link show the photo beside the polo line; a quotation's don't. The console
+     (your shop → Tax & Printing) has the same switches. Switch "On the A4 PDF" off and Save Settings:
+     the invoice PDF is text-only again while its customer link still shows the photo. Then switch "On
+     the customer link" off too: the link is text-only as well.
+  6. Edit Polo Shirt and switch Red / M off: refused (it has stock and is in the gift set). Switch Blue / M
+     off instead and save: it's removed (no documents). Switching it on again later brings it back. A
+     variant that is on documents is archived instead, and those documents still print it.
+  7. Export CSV: Group, Option 1/2 Name / Value, Barcode and Kit Components are filled. Import the file
+     again with "Update items with the same SKU": every row says update and nothing changes.
+  8. Phone width: inventory cards for Polo Shirt open to their variants; the option picker is a bottom
+     sheet with big buttons; the variant dialog's matrix scrolls inside its box.
+  9. Commit: git add . && git commit -m "Phase 21 - product variants, kits and image gallery"

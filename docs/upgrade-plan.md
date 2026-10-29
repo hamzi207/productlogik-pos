@@ -32,6 +32,11 @@
 - **Rev 11 (2026-10-25, during Phase 20)**: **stores and users are part of the paid subscription.** Only the superadmin changes plans and limits (the organization can only request a change). Organization admins add stores and invite users **up to their subscription's limits** (the plan's, or the organization's own override; the database refuses more) and manage them: store details, codes, who works where, store rules; team roles, deactivating, pending invites. **Deleting a store and switching a store off or back on is console-only**; past a limit, the superadmin raises it on the organization's Subscription tab or adds the store or user from the console. Phase 22's Team updates and Phase 17's console tools follow this rule.
 - **Rev 12 (2026-10-25, during Phase 20)**: **organization users sign in with a username and password, not email** (Phase 22, deliverable 6). Many shop staff don't use email or set their own passwords, so: usernames are unique across ProductLogik; the organization admin sets each user's password and changes it when needed (no invitation emails, no email reset, no forced change); org admins sign in the same way and keep an email only for notifications; their own passwords are reset by ProductLogik. Superadmins keep email + password + 2FA. Until Phase 22, V1's email invitations stay.
 - **Rev 13 (2026-10-26, during Phase 20)**: the product owner asked for **superadmins to change their own password in the console** (Phase 22, deliverable 6). Until then it's changed in the Supabase dashboard.
+- **Rev 14 (2026-10-26, Phase 21 start)**: **RF-21.1 kits and RF-21.2 image gallery are accepted** (Phase 21 deliverables 7 and 8). The product owner asked for product images on documents to be **switched on or off separately for each document type** (estimates, quotations, invoices) in Settings; document types added later (sales orders, delivery challans, credit notes) get their own switch in their phase. Also decided for Phase 21:
+  1. **Tax category moves to Phase 26**, where tax categories are built; product groups get it then.
+  2. **Brand is a custom attribute** (RF-18.1), so groups carry attributes like products do.
+  3. **One barcode per product or variant** (`inventory_items.barcode`) until Phase 23 moves it into `item_barcodes` with several per item.
+  4. **Every variant and kit counts as a product** on the plan's product limit (each is its own SKU). Archived variants don't count; bringing one back checks the limit.
 
 ---
 
@@ -687,6 +692,16 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
 4. **Bulk edit** across variants: price, cost, low-stock threshold, category, tax category.
 5. **CSV**: `Group`, `Option 1 Name`, `Option 1 Value`, … columns; export/import round-trips.
 6. **Documents**: scanning a variant barcode adds that variant. Picking a grouped product in line search opens a quick option picker (option buttons with stock per option).
+7. **RF-21.1 Kits / bundles** (Rev 14):
+   - A kit is a product made of other products (bill of materials: component + quantity in its unit). It has its own SKU, barcode and price, and no stock of its own.
+   - Its available stock is worked out from its components at each store (the smallest number of whole kits they make).
+   - On a quotation a kit line reserves its components; on an invoice it deducts them, at the line's store, in the stock ledger under each component. The components are saved with the line, so a later change to the kit doesn't change old documents.
+   - Its cost is the sum of its components' costs. Documents show "Includes: 2 × Clip, 1 × Cable" under the kit line.
+   - Kits can't contain kits, and a kit can't be a variant group.
+8. **RF-21.2 Image gallery** (Rev 14):
+   - Up to 8 images per product, kit or product group (PNG/JPEG, resized in the browser; Storage bucket `product-images`, one folder per organization). The first is the main image; drag to reorder. Variants show their group's images.
+   - Shown in the inventory list, product details and line search.
+   - **Settings → Tax & Printing → Product images on documents**: a switch each for estimates, quotations and invoices (all off by default; the console has the same card), plus **On the A4 PDF** and **On the customer link** (both on by default; owner requests 2026-10-26). Where a document's switch is on, its A4 PDF and / or share page show each line's main image, as those two switches say.
 
 **Migration outline** — `…_phase20_variants.sql`:
 - `product_groups`, `product_option_types (group_id, name, position)`, `product_option_values (option_type_id, value, position, price_delta)`.
@@ -703,6 +718,8 @@ Each phase lists its **Goal**, **Deliverables**, **Database migration outline**,
 - A group price edit updates only the variants that don't have their own price.
 - An archived variant is hidden from search, and its old invoices still print.
 - A grouped catalog round-trips through CSV.
+- RF-21.1: a kit of 2 × Clip + 1 × Cable with 10 clips and 3 cables at Store A shows 3 available there. Invoicing 2 kits deducts 4 clips and 2 cables at A, and the ledger names the invoice; 2 more kits on another invoice are refused in SQL (only 1 cable left at A). Cancelling the invoice gives them back.
+- RF-21.2: with images on for invoices only, an invoice's PDF and share page show line images and a quotation's don't.
 
 ---
 
@@ -1404,8 +1421,8 @@ Ideas are drawn from what comparable inventory/invoicing products offer: custome
 | RF-19.2 | 19 | Customer groups & tags | Group or tag customers (e.g. "Lahore dealers", "Monthly billing") to filter lists, statements, price lists and reports. | Accepted (Phase 19, 2026-10-25) |
 | RF-20.1 | 20 | Store-level price overrides | A store can sell an item at a different price from the organization's price (e.g. a mall branch). | Accepted (Phase 20, 2026-10-25) |
 | RF-20.2 | 20 | Per-store numbering series | Each store numbers its own documents (e.g. `LHR1-INV-1001`). | Accepted (Phase 20, 2026-10-25) |
-| RF-21.1 | 21 | Product bundles / kits | Sell a kit (e.g. "Starter Pack") as one line that deducts its component items from stock (bill of materials). | Not asked yet |
-| RF-21.2 | 21 | Product image gallery | Several images per product, shown in search and on the A4 quotation/invoice and share page (optional per document type). | Not asked yet |
+| RF-21.1 | 21 | Product bundles / kits | Sell a kit (e.g. "Starter Pack") as one line that deducts its component items from stock (bill of materials). | Accepted (Phase 21, 2026-10-26) |
+| RF-21.2 | 21 | Product image gallery | Several images per product, shown in search and on the A4 quotation/invoice and share page (optional per document type). | Accepted (Phase 21, 2026-10-26): a separate switch per document type in Settings |
 | RF-22.1 | 22 | Organization activity log | Org admins see who changed prices, stock, settings or documents in their organization, and when (their own audit trail). | Not asked yet |
 | RF-22.2 | 22 | Two-factor sign-in for organization users | Optional authenticator-app codes per organization, which an admin can require for admins/managers. | Not asked yet |
 | RF-22.3 | 22 | Sign-in hours per role | Restrict when roles can sign in (e.g. sales staff only 9am–9pm, shop time). | Not asked yet |

@@ -41,6 +41,13 @@ export const shopSettingsSchema = z.object({
     .min(1, "Quotations must be valid for at least 1 day.")
     .max(365, "Use 365 days or fewer."),
   printFormat: z.enum(PRINT_FORMATS, { error: "Choose A4 PDF or POS slip." }),
+  /** RF-21.2: product images on each kind of document (A4 PDF and customer link). */
+  imagesOnDrafts: z.boolean(),
+  imagesOnQuotations: z.boolean(),
+  imagesOnInvoices: z.boolean(),
+  /** Where those documents show them: their A4 PDF and / or their customer link. */
+  imagesOnPdf: z.boolean(),
+  imagesOnShare: z.boolean(),
 });
 
 export type ShopSettingsInput = z.infer<typeof shopSettingsSchema>;

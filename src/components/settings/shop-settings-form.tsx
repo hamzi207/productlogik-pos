@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Controller, useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlarmClock, Clock, Coins, FileText, Phone, Printer, Receipt } from "lucide-react";
+import { AlarmClock, Clock, Coins, FileText, ImageIcon, Phone, Printer, Receipt } from "lucide-react";
 import { updateShopSettings } from "@/lib/actions/settings";
 import { useUnsavedSettings } from "./unsaved-settings";
 import { formatMoney } from "@/lib/format";
@@ -33,6 +33,11 @@ const CHANGE_TEXT: Record<keyof ShopSettingsInput, [label: string, value: (v: Sh
   pricesIncludeTax: ["Selling prices include tax", (v) => onOff(v.pricesIncludeTax)],
   quoteValidityDays: ["Quotation valid for", (v) => `${v.quoteValidityDays} day${v.quoteValidityDays === 1 ? "" : "s"}`],
   printFormat: ["Print format", (v) => PRINT_FORMAT_LABEL[v.printFormat]],
+  imagesOnDrafts: ["Product images on estimates", (v) => onOff(v.imagesOnDrafts)],
+  imagesOnQuotations: ["Product images on quotations", (v) => onOff(v.imagesOnQuotations)],
+  imagesOnInvoices: ["Product images on invoices", (v) => onOff(v.imagesOnInvoices)],
+  imagesOnPdf: ["Product images on the A4 PDF", (v) => onOff(v.imagesOnPdf)],
+  imagesOnShare: ["Product images on the customer link", (v) => onOff(v.imagesOnShare)],
   allowInternationalPhones: ["Allow international numbers", (v) => onOff(v.allowInternationalPhones)],
   timezone: ["Shop timezone", (v) => v.timezone],
   weekStart: ["First day of the week", (v) => WEEK_START_LABEL[v.weekStart]],
@@ -51,13 +56,14 @@ function describeChanges(before: ShopSettingsInput, after: ShopSettingsInput, fi
 }
 
 /** The cards, by Settings tab (Localization, POS, Documents, Printing). */
-export type SettingsSection = "currency" | "tax" | "validity" | "printFormat" | "phones" | "timezone" | "clock";
+export type SettingsSection = "currency" | "tax" | "validity" | "printFormat" | "productImages" | "phones" | "timezone" | "clock";
 
 const SECTION_FIELDS: Record<SettingsSection, (keyof ShopSettingsInput)[]> = {
   currency: ["currency", "showPaisa"],
   tax: ["taxRate", "pricesIncludeTax"],
   validity: ["quoteValidityDays"],
   printFormat: ["printFormat"],
+  productImages: ["imagesOnDrafts", "imagesOnQuotations", "imagesOnInvoices", "imagesOnPdf", "imagesOnShare"],
   phones: ["allowInternationalPhones"],
   timezone: ["timezone", "weekStart"],
   clock: ["showOverviewLogo", "showClock", "clockStyle", "clock24Hour"],
@@ -97,10 +103,11 @@ export function ShopSettingsForm({ sections, label, initial, timeZoneGroups, can
     defaultValues: initial,
   });
 
-  const [currency, showPaisa, showClock, clockStyle] = useWatch({
+  const [currency, showPaisa, showClock, clockStyle, imagesOnDrafts, imagesOnQuotations, imagesOnInvoices] = useWatch({
     control,
-    name: ["currency", "showPaisa", "showClock", "clockStyle"],
+    name: ["currency", "showPaisa", "showClock", "clockStyle", "imagesOnDrafts", "imagesOnQuotations", "imagesOnInvoices"],
   });
+  const anyImages = imagesOnDrafts || imagesOnQuotations || imagesOnInvoices;
   const preview = formatMoney(12500, { currency, showPaisa });
 
   const persist = async (values: ShopSettingsInput) => {
@@ -288,6 +295,64 @@ export function ShopSettingsForm({ sections, label, initial, timeZoneGroups, can
               )}
             />
           </div>
+        </section>
+        )}
+
+        {has("productImages") && (
+        <section className="card settings-card">
+          <div className="settings-card-head">
+            <span className="header-icon blue"><ImageIcon size={18} /></span>
+            <div>
+              <h2>Product images on documents</h2>
+              <p>A small photo beside each product line. Choose the documents, then where they show the photos: the A4 PDF, the customer link or both. Products without an image just show their name.</p>
+            </div>
+          </div>
+          <label className="settings-row">
+            <span className="settings-label">
+              Estimates
+              <small>Drafts you print or share before they become a quotation.</small>
+            </span>
+            <input type="checkbox" className="switch" {...register("imagesOnDrafts")} />
+          </label>
+          <label className="settings-row">
+            <span className="settings-label">
+              Quotations
+              <small>Helps the customer see what they&apos;re being offered.</small>
+            </span>
+            <input type="checkbox" className="switch" {...register("imagesOnQuotations")} />
+          </label>
+          <label className="settings-row">
+            <span className="settings-label">
+              Invoices
+              <small>The 80mm POS slip never shows images.</small>
+            </span>
+            <input type="checkbox" className="switch" {...register("imagesOnInvoices")} />
+          </label>
+          {/* Where the photos show only matters once a document above shows them. */}
+          {anyImages ? (
+            <>
+              <label className="settings-row">
+                <span className="settings-label">
+                  On the A4 PDF
+                  <small>The PDF you download, print or attach to an email.</small>
+                </span>
+                <input type="checkbox" className="switch" {...register("imagesOnPdf")} />
+              </label>
+              <label className="settings-row">
+                <span className="settings-label">
+                  On the customer link
+                  <small>The page the customer opens from the WhatsApp or email link.</small>
+                </span>
+                <input type="checkbox" className="switch" {...register("imagesOnShare")} />
+              </label>
+            </>
+          ) : (
+            <div className="settings-row">
+              <span className="settings-label">
+                <small>Switch on estimates, quotations or invoices above, then choose where their photos show: the A4 PDF, the customer link or both.</small>
+              </span>
+            </div>
+          )}
         </section>
         )}
 

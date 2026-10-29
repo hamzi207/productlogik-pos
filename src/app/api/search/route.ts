@@ -4,6 +4,7 @@ import { documentHref, localDate, sectionForStatus, SECTION, statusDisplay, stat
 import { formatMoney } from "@/lib/format";
 import { formatQty } from "@/lib/uom";
 import { getShopSession } from "@/lib/auth";
+import { KIT_EMBED, kitAvailable, mapKitParts, type KitEmbedRow } from "@/lib/kits";
 import { getStoreContext } from "@/lib/store";
 import { availableElsewhere, mapItemStock, stockAt } from "@/lib/stock";
 import { createClient } from "@/lib/supabase/server";
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
 
   const [customers, items] = await Promise.all([
     supabase.rpc("search_customers", { p_query: q }).select("id, name, customer_type, whatsapp_number").eq("is_walk_in", false).order("name").limit(5),
-    supabase.rpc("search_inventory_items", { p_query: q }).select("id, name, sku, quantity_on_hand, reserved_quantity, selling_price, base_uom:units_of_measure!inventory_items_base_uom_fkey(code), stock_levels(store_id, on_hand, reserved, low_stock_threshold)").order("name").limit(5),
+    supabase.rpc("search_inventory_items", { p_query: q }).select(`id, name, sku, is_kit, quantity_on_hand, reserved_quantity, selling_price, base_uom:units_of_measure!inventory_items_base_uom_fkey(code), stock_levels(store_id, on_hand, reserved, low_stock_threshold), ${KIT_EMBED}`).order("name").limit(5),
   ]);
 
   // Documents: by number (draft / quotation / invoice), walk-in name, or a matching customer.
@@ -70,8 +71,10 @@ export async function GET(request: NextRequest) {
       href: `/inventory?q=${encodeURIComponent(i.sku)}`,
       title: i.name,
       detail: `${i.sku} · ${money(i.selling_price)}`,
-      // Phase 20: the current store's stock once there is more than one store.
-      badge: stores.multi
+      // Phase 20: the current store's stock once there is more than one store. RF-21.1: kits show the whole kits their products make.
+      badge: i.is_kit
+        ? `${formatQty(kitAvailable(mapKitParts(i as KitEmbedRow), stores.multi ? stores.current.id : null))} kits available${stores.multi ? " here" : ""}`
+        : stores.multi
         ? (() => {
             const { stock } = mapItemStock({ stock_levels: i.stock_levels, store_item_prices: [] });
             const unit = i.base_uom?.code;

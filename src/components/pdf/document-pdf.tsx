@@ -20,7 +20,8 @@ const s = StyleSheet.create({
   page: { padding: 36, paddingBottom: 56, fontSize: 9, color: INK, fontFamily: FONT },
   header: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", paddingBottom: 14, borderBottomWidth: 2 },
   shopBlock: { width: "58%" },
-  logo: { maxWidth: 170, maxHeight: 54, objectFit: "contain", marginBottom: 6 },
+  // Left-aligned with the shop name: without alignSelf the box spans the column and "contain" centres the logo in it.
+  logo: { maxWidth: 170, maxHeight: 54, objectFit: "contain", objectPosition: "left center", alignSelf: "flex-start", marginBottom: 6 },
   shopName: { fontSize: 15, fontFamily: FONT_BOLD, marginBottom: 3 },
   small: { fontSize: 8.5, color: MUTED, lineHeight: 1.45 },
   titleBlock: { alignItems: "flex-end" },
@@ -37,6 +38,9 @@ const s = StyleSheet.create({
   tr: { flexDirection: "row", paddingVertical: 6, paddingHorizontal: 6, borderBottomWidth: 1, borderBottomColor: LINE },
   cNo: { width: "5%" },
   cItem: { width: "34%", paddingRight: 6 },
+  itemRow: { flexDirection: "row", gap: 6 },
+  itemImage: { width: 30, height: 30, objectFit: "cover", borderRadius: 3 },
+  itemText: { flex: 1 },
   // Wide enough for "1.25 kg" / "12 pcs" (Phase 19 units).
   cQty: { width: "11%", textAlign: "right" },
   cNum: { width: "12.5%", textAlign: "right" },
@@ -59,7 +63,10 @@ const s = StyleSheet.create({
   footer: { position: "absolute", left: 36, right: 36, bottom: 24, flexDirection: "row", justifyContent: "space-between", fontSize: 7, color: MUTED },
 });
 
-type Props = { doc: PrintableDocument; logo: { data: Buffer; format: "png" | "jpg" } | null };
+type PdfImage = { data: Buffer; format: "png" | "jpg" };
+
+/** `lineImages`: RF-21.2 thumbnails per line (when the document shows product images). */
+type Props = { doc: PrintableDocument; logo: PdfImage | null; lineImages?: (PdfImage | null)[] };
 
 /** Invoices with a balance: where to send the money (Settings → Documents → Bank details). */
 function BankRemittance({ bank, balance, reference, accent }: { bank: NonNullable<PrintableDocument["bank"]>; balance: string; reference: string; accent: string }) {
@@ -89,7 +96,7 @@ function BankRemittance({ bank, balance, reference, accent }: { bank: NonNullabl
   );
 }
 
-export function DocumentPdf({ doc, logo }: Props) {
+export function DocumentPdf({ doc, logo, lineImages = [] }: Props) {
   const money = (n: number) => formatMoney(n, doc.money);
   const shopLines = [
     doc.shop.address,
@@ -157,10 +164,15 @@ export function DocumentPdf({ doc, logo }: Props) {
         {doc.lines.map((l, i) => (
           <View key={i} style={[s.tr, i % 2 === 1 ? { backgroundColor: SOFT } : {}]} wrap={false}>
             <Text style={s.cNo}>{i + 1}</Text>
-            <View style={s.cItem}>
-              <Text style={{ fontFamily: FONT_BOLD }}>{l.description}</Text>
-              {l.details && <Text style={s.sku}>{l.details}</Text>}
-              {l.sku && <Text style={s.sku}>{l.sku}</Text>}
+            <View style={[s.cItem, s.itemRow]}>
+              {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt */}
+              {lineImages[i] && <Image src={lineImages[i]} style={s.itemImage} />}
+              <View style={s.itemText}>
+                <Text style={{ fontFamily: FONT_BOLD }}>{l.description}</Text>
+                {l.includes && <Text style={s.sku}>Includes: {l.includes}</Text>}
+                {l.details && <Text style={s.sku}>{l.details}</Text>}
+                {l.sku && <Text style={s.sku}>{l.sku}</Text>}
+              </View>
             </View>
             <Text style={s.cQty}>{formatQty(l.quantity, l.unit)}</Text>
             <Text style={s.cNum}>{money(l.unitPrice)}</Text>
@@ -184,7 +196,7 @@ export function DocumentPdf({ doc, logo }: Props) {
             </View>
             {doc.totals.discount > 0 && (
               <View style={s.totalRow}>
-                <Text style={{ color: MUTED }}>Discount{doc.totals.discountReason ? ` (${doc.totals.discountReason})` : ""}</Text>
+                <Text style={{ color: MUTED }}>Discount{doc.totals.discountPercent ? ` ${doc.totals.discountPercent}%` : ""}</Text>
                 <Text>−{money(doc.totals.discount)}</Text>
               </View>
             )}

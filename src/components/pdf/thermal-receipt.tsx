@@ -100,6 +100,7 @@ export function ThermalReceipt({ doc, shareUrl }: Props) {
         {doc.lines.map((l, i) => (
           <View key={i} style={s.item} wrap={false}>
             <Text style={s.itemName}>{l.description}</Text>
+            {l.includes && <Text style={[s.muted, { fontSize: 7.5 }]}>Includes: {l.includes}</Text>}
             {l.details && <Text style={[s.muted, { fontSize: 7.5 }]}>{l.details}</Text>}
             <View style={s.itemSub}>
               <Text style={s.muted}>

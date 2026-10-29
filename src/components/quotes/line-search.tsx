@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Box, Check, Loader2, PenLine, Plus, Search } from "lucide-react";
+import { Box, Check, Layers, Loader2, PenLine, Plus, Search } from "lucide-react";
 import { colorStyle } from "@/lib/category-colors";
 import { formatMoney, type MoneyFormat } from "@/lib/format";
 import { LOOKUP_DELAY_MS } from "@/lib/search-delay";
 import { SINGLE_DOCUMENT_STORE, type DocumentStores } from "@/lib/stock";
 import { formatQty } from "@/lib/uom";
-import type { PickerItem, PickerItemsResponse } from "@/lib/types/quote";
+import type { PickerGroup, PickerItem, PickerItemsResponse, PickerResult } from "@/lib/types/quote";
+import { OptionPicker } from "@/components/inventory/option-picker";
 import { MobileSheet } from "./mobile-sheet";
 
 /** A main category, for the filter chips in the phone search (`color`: its RF-18.2 colour). */
@@ -50,6 +51,51 @@ function Stock({ item, stores }: { item: PickerItem; stores: DocumentStores }) {
   );
 }
 
+/** RF-21.2: the product's main image, else a box (a stack for product groups). */
+function Thumb({ url, group }: { url: string | null; group?: boolean }) {
+  return (
+    <span className="product-thumbnail">
+      {url ? (
+        // eslint-disable-next-line @next/next/no-img-element -- product photo on Supabase Storage
+        <img src={url} alt="" loading="lazy" />
+      ) : group ? (
+        <Layers size={15} />
+      ) : (
+        <Box size={15} />
+      )}
+    </span>
+  );
+}
+
+/** Phase 21: a variant's "Red / L" chip; RF-21.1: a Kit chip with what it holds on hover. */
+function Chips({ item }: { item: PickerItem }) {
+  return (
+    <>
+      {item.variant_label && <span className="variant-chip">{item.variant_label}</span>}
+      {item.is_kit && (
+        <span className="variant-chip kit-chip" title={item.kit_includes ? `Includes: ${item.kit_includes}` : undefined}>
+          Kit
+        </span>
+      )}
+    </>
+  );
+}
+
+/** A group's line: available stock across its variants and its price range. */
+function groupSummary(group: PickerGroup, money: MoneyFormat, here: string) {
+  const free = group.variants.reduce((sum, v) => sum + Math.max(v.quantity_on_hand - v.reserved_quantity, 0), 0);
+  const prices = group.variants.map((v) => v.selling_price);
+  const low = Math.min(...prices);
+  const high = Math.max(...prices);
+  return {
+    stock: free > 0 ? `${formatQty(free)} available${here}` : `None available${here}`,
+    tone: free > 0 ? "in-stock" : "stock-out",
+    price: prices.length === 0 ? "—" : low === high ? formatMoney(low, money) : `${formatMoney(low, money)} – ${formatMoney(high, money)}`,
+  };
+}
+
+const resultKey = (r: PickerResult) => (r.kind === "group" ? `group-${r.group.id}` : r.item.id);
+
 /** Products matching the query (and category), fetched while `enabled`, 200ms after the last keystroke. */
 function usePartSearch(enabled: boolean, query: string, category: string | null, store: string | null) {
   const q = query.trim();
@@ -59,7 +105,7 @@ function usePartSearch(enabled: boolean, query: string, category: string | null,
   if (store) params.set("store", store);
   const request = `/api/quote-items${params.size ? `?${params}` : ""}`;
   const [active, setActive] = useState(0);
-  const [result, setResult] = useState<{ request: string; items: PickerItem[]; error: string | null }>({
+  const [result, setResult] = useState<{ request: string; items: PickerResult[]; error: string | null }>({
     request: "",
     items: [],
     error: null,
@@ -73,7 +119,7 @@ function usePartSearch(enabled: boolean, query: string, category: string | null,
         .then(async (res) => {
           if (!res.ok) throw new Error("Couldn't load products.");
           const body = (await res.json()) as PickerItemsResponse;
-          setResult({ request, items: body.items, error: null });
+          setResult({ request, items: body.results, error: null });
           setActive(0);
         })
         .catch((err) => !ctrl.signal.aborted && setResult({ request, items: [], error: err.message }));
@@ -90,7 +136,8 @@ function usePartSearch(enabled: boolean, query: string, category: string | null,
 /**
  * Search box at the top of the line items: type a name or SKU, click a product
  * to add it. Anything not in inventory can be added as a custom item.
- * On phones the box opens a full-screen search sheet instead.
+ * Phase 21: a product with variants opens the option picker. On phones the box
+ * opens a full-screen search sheet instead.
  */
 export function LineSearch({ money, addedIds, onAdd, onAddCustom, categories, vehicleSearch, stores = SINGLE_DOCUMENT_STORE }: Props) {
   const listId = useId();
@@ -98,13 +145,16 @@ export function LineSearch({ money, addedIds, onAdd, onAddCustom, categories, ve
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [picking, setPicking] = useState<PickerGroup | null>(null);
   const { q, items, error, loading, active, setActive } = usePartSearch(open, query, null, stores.multi ? stores.docStoreId : null);
+  const here = stores.multi ? " here" : "";
   // The last option adds the typed text as a custom item.
   const optionCount = items.length + 1;
 
   // Close the menu so the new line isn't hidden under it; typing reopens it.
-  const add = (item: PickerItem) => {
-    onAdd(item);
+  const add = (result: PickerResult) => {
+    if (result.kind === "group") setPicking(result.group);
+    else onAdd(result.item);
     setQuery("");
     setOpen(false);
   };
@@ -143,7 +193,7 @@ export function LineSearch({ money, addedIds, onAdd, onAddCustom, categories, ve
           aria-autocomplete="list"
           aria-activedescendant={open ? `${listId}-${active}` : undefined}
           aria-label="Search products to add"
-          placeholder="Search products by name or SKU, then click to add…"
+          placeholder="Search products by name, SKU or barcode, then click to add…"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -179,31 +229,67 @@ export function LineSearch({ money, addedIds, onAdd, onAddCustom, categories, ve
         vehicleSearch={vehicleSearch}
         stores={stores}
       />
+      <OptionPicker
+        group={picking}
+        money={money}
+        storeNote={here.trim()}
+        onOpenChange={(next) => !next && setPicking(null)}
+        onAdd={(item) => {
+          onAdd(item);
+          setPicking(null);
+          inputRef.current?.focus();
+        }}
+      />
 
       {open && (
         <ul id={listId} role="listbox" aria-label="Products" className="line-search-menu">
-          {items.map((item, i) => (
-            <li
-              key={item.id}
-              id={`${listId}-${i}`}
-              role="option"
-              aria-selected={i === active}
-              className={i === active ? "active" : ""}
-              onMouseDown={(e) => e.preventDefault()}
-              onMouseEnter={() => setActive(i)}
-              onClick={() => add(item)}
-            >
-              <span className="product-thumbnail"><Box size={15} /></span>
-              <span className="line-search-info">
-                <strong className="product-title">{item.name}</strong>
-                <span><span className="mono">{item.sku}</span> · {item.category?.name ?? "Uncategorised"} · <Stock item={item} stores={stores} /></span>
-              </span>
-              <span className="line-search-price">
-                {formatMoney(item.selling_price, money)}
-                {addedIds.has(item.id) && <small>On this document · adds 1</small>}
-              </span>
-            </li>
-          ))}
+          {items.map((result, i) => {
+            const option = {
+              id: `${listId}-${i}`,
+              role: "option",
+              "aria-selected": i === active,
+              className: i === active ? "active" : "",
+              onMouseDown: (e: React.MouseEvent) => e.preventDefault(),
+              onMouseEnter: () => setActive(i),
+              onClick: () => add(result),
+            } as const;
+            if (result.kind === "group") {
+              const { group } = result;
+              const summary = groupSummary(group, money, here);
+              return (
+                <li key={resultKey(result)} {...option}>
+                  <Thumb url={group.image_url} group />
+                  <span className="line-search-info">
+                    <strong className="product-title">{group.name}</strong>
+                    <span>
+                      <span className="variant-chip">{group.variants.length} variants</span> · {group.category?.name ?? "Uncategorised"} ·{" "}
+                      <span className={summary.tone}>{summary.stock}</span>
+                    </span>
+                  </span>
+                  <span className="line-search-price">
+                    {summary.price}
+                    <small>Choose options</small>
+                  </span>
+                </li>
+              );
+            }
+            const { item } = result;
+            return (
+              <li key={resultKey(result)} {...option}>
+                <Thumb url={item.image_url} />
+                <span className="line-search-info">
+                  <strong className="product-title">{item.name}</strong>
+                  <span>
+                    <span className="mono">{item.sku}</span> <Chips item={item} /> · {item.category?.name ?? "Uncategorised"} · <Stock item={item} stores={stores} />
+                  </span>
+                </span>
+                <span className="line-search-price">
+                  {formatMoney(item.selling_price, money)}
+                  {addedIds.has(item.id) && <small>On this document · adds 1</small>}
+                </span>
+              </li>
+            );
+          })}
           {!loading && items.length === 0 && (
             <li className="line-search-empty" role="presentation">{error ?? (q ? "No products match." : "No products in inventory yet.")}</li>
           )}
@@ -245,7 +331,9 @@ function PartSearchSheet({
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [added, setAdded] = useState(0);
+  const [picking, setPicking] = useState<PickerGroup | null>(null);
   const { q, items, error, loading } = usePartSearch(open, query, category, stores.multi ? stores.docStoreId : null);
+  const here = stores.multi ? " here" : "";
 
   const close = (next: boolean) => {
     onOpenChange(next);
@@ -279,7 +367,7 @@ function PartSearchSheet({
           type="search"
           enterKeyHint="search"
           aria-label="Search products"
-          placeholder={vehicleSearch ? "Name, SKU or vehicle…" : "Name or SKU…"}
+          placeholder={vehicleSearch ? "Name, SKU or vehicle…" : "Name, SKU or barcode…"}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           maxLength={100}
@@ -304,33 +392,70 @@ function PartSearchSheet({
           ))}
         </div>
       )}
+      <OptionPicker
+        group={picking}
+        money={money}
+        storeNote={here.trim()}
+        onOpenChange={(next) => !next && setPicking(null)}
+        onAdd={(item) => {
+          onAdd(item);
+          setAdded((n) => n + 1);
+          setPicking(null);
+        }}
+      />
       <ul className="sheet-results" aria-label="Products" aria-busy={loading}>
-        {items.map((item) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              className="sheet-result"
-              onClick={() => {
-                onAdd(item);
-                setAdded((n) => n + 1);
-              }}
-            >
-              <span className="product-thumbnail"><Box size={16} /></span>
-              <span className="line-search-info">
-                <strong className="product-title">{item.name}</strong>
-                <span><span className="mono">{item.sku}</span> · <Stock item={item} stores={stores} /></span>
-              </span>
-              <span className="line-search-price">
-                {formatMoney(item.selling_price, money)}
-                {addedIds.has(item.id) ? (
-                  <small><Check size={11} /> Added · tap for +1</small>
-                ) : (
-                  <small className="sheet-add"><Plus size={11} /> Add</small>
-                )}
-              </span>
-            </button>
-          </li>
-        ))}
+        {items.map((result) => {
+          if (result.kind === "group") {
+            const { group } = result;
+            const summary = groupSummary(group, money, here);
+            return (
+              <li key={resultKey(result)}>
+                <button type="button" className="sheet-result" onClick={() => setPicking(group)}>
+                  <Thumb url={group.image_url} group />
+                  <span className="line-search-info">
+                    <strong className="product-title">{group.name}</strong>
+                    <span>
+                      <span className="variant-chip">{group.variants.length} variants</span> · <span className={summary.tone}>{summary.stock}</span>
+                    </span>
+                  </span>
+                  <span className="line-search-price">
+                    {summary.price}
+                    <small className="sheet-add"><Layers size={11} /> Options</small>
+                  </span>
+                </button>
+              </li>
+            );
+          }
+          const { item } = result;
+          return (
+            <li key={resultKey(result)}>
+              <button
+                type="button"
+                className="sheet-result"
+                onClick={() => {
+                  onAdd(item);
+                  setAdded((n) => n + 1);
+                }}
+              >
+                <Thumb url={item.image_url} />
+                <span className="line-search-info">
+                  <strong className="product-title">{item.name}</strong>
+                  <span>
+                    <span className="mono">{item.sku}</span> <Chips item={item} /> · <Stock item={item} stores={stores} />
+                  </span>
+                </span>
+                <span className="line-search-price">
+                  {formatMoney(item.selling_price, money)}
+                  {addedIds.has(item.id) ? (
+                    <small><Check size={11} /> Added · tap for +1</small>
+                  ) : (
+                    <small className="sheet-add"><Plus size={11} /> Add</small>
+                  )}
+                </span>
+              </button>
+            </li>
+          );
+        })}
         {!loading && items.length === 0 && (
           <li className="sheet-empty">{error ?? (q || category ? "No products match." : "No products in inventory yet.")}</li>
         )}

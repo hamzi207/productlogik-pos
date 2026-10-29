@@ -91,6 +91,7 @@ async function InventoryResults({ searchParams }: { searchParams: SearchParams }
     stock: first(raw.stock),
     sort: first(raw.sort),
     attributes: attributeParams(raw),
+    view: first(raw.view),
   });
   const pagination = parsePagination({ page: first(raw.page), limit: first(raw.limit) });
   // Phase 20: with more than one store the list shows the current store's stock.
@@ -119,6 +120,7 @@ async function InventoryResults({ searchParams }: { searchParams: SearchParams }
       fitment={fitment}
       filtered={filtered}
       storeView={storeView}
+      view={filters.view ?? "grouped"}
     />
   );
 }

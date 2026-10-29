@@ -87,7 +87,7 @@ export async function getTenantSubscription(tenantId: string): Promise<TenantSub
     admin.from("subscription_adjustments").select("id, description, amount, created_at").eq("tenant_id", tenantId).is("invoice_id", null).order("created_at"),
     admin.from("tenant_subscription_history").select("*").eq("tenant_id", tenantId).order("changed_at", { ascending: false }).limit(50),
     admin.from("profiles").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).is("deactivated_at", null),
-    admin.from("inventory_items").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId),
+    admin.from("inventory_items").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("is_archived", false),
     // Phase 20: open stores count towards the plan's store limit.
     admin.from("stores").select("id", { count: "exact", head: true }).eq("tenant_id", tenantId).eq("is_active", true),
   ]);

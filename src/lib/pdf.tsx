@@ -13,7 +13,7 @@ const FONT_DIR = path.join(process.cwd(), "src", "assets", "fonts");
 Font.register({ family: "NotoSansArabic", src: path.join(FONT_DIR, "NotoSansArabic-Regular.ttf") });
 Font.register({ family: "NotoSansArabic-Bold", src: path.join(FONT_DIR, "NotoSansArabic-Bold.ttf") });
 
-/** Downloads the shop logo for embedding; a missing or broken logo just leaves it out. */
+/** Downloads the shop logo (or a product image) for embedding; a missing or broken one is just left out. */
 async function fetchLogo(url: string | null) {
   if (!url) return null;
   try {
@@ -28,9 +28,18 @@ async function fetchLogo(url: string | null) {
   }
 }
 
+/** RF-21.2: the lines' thumbnails (each one fetched once), in line order. */
+async function fetchLineImages(doc: PrintableDocument) {
+  if (!doc.pdfImages) return [];
+  const urls = [...new Set(doc.lines.flatMap((l) => (l.imageUrl ? [l.imageUrl] : [])))].slice(0, 100);
+  const fetched = new Map(await Promise.all(urls.map(async (u) => [u, await fetchLogo(u)] as const)));
+  return doc.lines.map((l) => (l.imageUrl ? (fetched.get(l.imageUrl) ?? null) : null));
+}
+
 /** The A4 PDF as a file: its bytes and a safe filename (also attached to emails). */
 export async function documentPdf(doc: PrintableDocument) {
-  const buffer = await renderToBuffer(<DocumentPdf doc={doc} logo={await fetchLogo(doc.shop.logoUrl)} />);
+  const [logo, lineImages] = await Promise.all([fetchLogo(doc.shop.logoUrl), fetchLineImages(doc)]);
+  const buffer = await renderToBuffer(<DocumentPdf doc={doc} logo={logo} lineImages={lineImages} />);
   return { buffer, filename: safeFilename(`${doc.title}-${doc.number}.pdf`) };
 }
 
